@@ -1,19 +1,24 @@
 # Overcooked Party 🍲
 
-A couch-party remake of Overcooked. Your laptop is the game screen — AirPlay
-or screen-share it to the TV. Everyone else scans the QR code with their
-phone and their phone becomes the gamepad (joystick + GRAB + CHOP/DASH).
+A couch-party remake of Overcooked, built as a Next.js app with native
+WebSockets on Vercel. Your laptop opens the game screen — AirPlay or
+screen-share it to the TV. Everyone else scans the QR code and their phone
+becomes the gamepad (joystick + GRAB + CHOP/DASH).
 
 ## Play
 
+**On Vercel** (works anywhere, phones just need internet): deploy, open the
+deployment URL on the laptop, put it on the TV. Done.
+
+**On your LAN** (offline, lowest latency):
+
 ```sh
 npm install
-npm run build && npm start
+npm run build && npm start   # custom server on :3000 (PORT to override)
 ```
 
-Open `http://localhost:3117` on the laptop and put that window on the TV.
-Phones must be on the same Wi-Fi; they scan the QR on screen. Any chef
-presses **Start**. Up to 8 players.
+Open the printed `http://<lan-ip>:3000` on the laptop; phones on the same
+Wi-Fi scan the QR. Any chef presses **Start**. Up to 8 players.
 
 Chop ingredients on the boards (hold CHOP), drop 3 into a pot, plate the
 soup when it dings, and run it to the serve window before the order ticket
@@ -22,20 +27,31 @@ expires. Don't let pots burn. 3 minutes per round.
 ## Develop
 
 ```sh
-npm run dev        # game server :3117 + vite :5173 (LAN-exposed)
+npm run dev        # custom Next dev server on :3000 (HMR + websockets)
 npm run typecheck
-npx tsx scripts/smoke.ts   # E2E over real websockets (server must be running)
+npm run smoke      # E2E over real websockets against a running server
+                   # (PORT=… or WS_URL=wss://…/api/ws to point elsewhere)
 ```
 
-In dev, open `http://<your-lan-ip>:5173` so the QR code works for phones.
 Add `?debug` to the host URL for tile coordinates.
 
 ## How it works
 
-- `server/` — authoritative simulation at 30 Hz plus rooms over
-  express + ws on port 3117 (override with `PORT`).
-- `src/host/` — TV view: canvas kitchen, snapshot interpolation, lobby QR.
-- `src/controller/` — phone gamepad: pointer-events joystick, haptics,
-  wake lock, auto-reconnect.
+- `app/api/ws/route.ts` — WebSocket upgrade on Vercel Fluid Compute via
+  `experimental_upgradeWebSocket` (`@vercel/functions`).
+- `server/local.ts` — custom Next server for LAN parties; same room
+  manager, `ws` handles the upgrade, single process, no external deps.
+- `realtime/` — transport-agnostic rooms + authoritative 30 Hz sim that
+  runs inside the host's connection. Built for Vercel's rules: connections
+  die at `maxDuration` and reconnects may land on other instances, so the
+  host resumes its room (`hello-host {resume}`), controllers reclaim seats
+  with tokens, snapshots checkpoint ~1/s, and an ownership lease prevents
+  two instances from ticking one kitchen. State/bus live in memory locally
+  and in Redis (`REDIS_URL` or `KV_URL`, e.g. Upstash from the Vercel
+  Marketplace) for multi-instance correctness in production.
+- `game/game.ts` + `shared/levels.ts` — the pure simulation.
+- `components/host/` — TV view: canvas kitchen, snapshot interpolation,
+  QR lobby. `components/controller/` — phone gamepad: pointer-events
+  joystick, haptics, wake lock, auto-reconnect.
 - `shared/types.ts` + `shared/protocol.ts` — the frozen wire contract.
 - `SPEC.md` — full game rules and the interaction table.

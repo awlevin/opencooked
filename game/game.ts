@@ -7,6 +7,7 @@
 import type { Btn } from '../shared/protocol';
 import { createLevel } from '../shared/levels';
 import type {
+  HeldItem,
   IngredientType,
   Order,
   Phase,
@@ -90,6 +91,48 @@ function sameMultiset(a: readonly IngredientType[], b: readonly IngredientType[]
   const y = [...b].sort();
   for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;
   return true;
+}
+
+function num(v: unknown): number {
+  return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+}
+
+function cloneItem(item: HeldItem | null | undefined): HeldItem | null {
+  if (!item) return null;
+  return item.kind === 'ingredient'
+    ? { kind: 'ingredient', ing: { type: item.ing.type, chopped: item.ing.chopped === true } }
+    : { kind: 'plate', soup: item.soup ? [...item.soup] : null };
+}
+
+function cloneTile(tile: Tile): Tile {
+  const out: Tile = { t: tile.t };
+  if (tile.crate) out.crate = tile.crate;
+  if (tile.item !== undefined) out.item = cloneItem(tile.item);
+  if (tile.chopMs !== undefined) out.chopMs = num(tile.chopMs);
+  if (tile.pot) {
+    out.pot = {
+      contents: [...tile.pot.contents],
+      cookMs: num(tile.pot.cookMs),
+      state: tile.pot.state,
+    };
+  }
+  return out;
+}
+
+function clonePlayer(p: PlayerState): PlayerState {
+  const dx = num(p.dir?.x);
+  const dy = num(p.dir?.y);
+  const facing = Math.hypot(dx, dy) > 1e-4 ? { x: dx, y: dy } : { x: 0, y: 1 };
+  return {
+    id: String(p.id),
+    name: String(p.name),
+    color: String(p.color),
+    pos: { x: num(p.pos?.x), y: num(p.pos?.y) },
+    dir: facing,
+    held: cloneItem(p.held),
+    chopping: false,
+    dashMsLeft: 0,
+  };
 }
 
 export interface GameOptions {
@@ -178,6 +221,60 @@ export class Game {
       rt.dashCooldownMs = 0;
       rt.dashDir = { x: 0, y: 1 };
     }
+  }
+
+  /**
+   * Rebuild this Game from a checkpointed Snapshot — a host that reconnected
+   * after its serverless function (or its whole instance) went away resumes
+   * mid-round from here. The snapshot is deep-copied, so the caller keeps
+   * ownership of the object it passed in.
+   *
+   * Player input state is not part of a Snapshot: everyone resumes with an
+   * idle stick and no buttons held. The order cadence restarts too, so the
+   * next order lands at most ORDER_SPAWN_MS after the restore.
+   */
+  restoreSnapshot(src: Snapshot): void {
+    if (!Number.isInteger(src.w) || !Number.isInteger(src.h) || src.w <= 0 || src.h <= 0) {
+      throw new Error('restoreSnapshot: bad grid size');
+    }
+    if (!Array.isArray(src.tiles) || src.tiles.length !== src.w * src.h) {
+      throw new Error('restoreSnapshot: tiles do not match the grid');
+    }
+    if (!Array.isArray(src.players) || !Array.isArray(src.orders)) {
+      throw new Error('restoreSnapshot: missing players or orders');
+    }
+
+    const s = this.snapshot;
+    s.w = src.w;
+    s.h = src.h;
+    s.tiles = src.tiles.map(cloneTile);
+    s.orders = src.orders.map((o) => ({ ...o, recipe: [...o.recipe] }));
+    s.score = num(src.score);
+    s.served = num(src.served);
+    s.missed = num(src.missed);
+    s.msLeft = clamp(num(src.msLeft), 0, ROUND_MS);
+    s.phase = src.phase === 'playing' || src.phase === 'gameover' ? src.phase : 'lobby';
+
+    this.rts.clear();
+    s.players = [];
+    for (const p of src.players) {
+      const state = clonePlayer(p);
+      this.rts.set(state.id, {
+        s: state,
+        move: { x: 0, y: 0 },
+        aPresses: 0,
+        bPresses: 0,
+        bDown: false,
+        dashCooldownMs: 0,
+        dashDir: { x: state.dir.x, y: state.dir.y },
+      });
+      s.players.push(state);
+    }
+
+    // Tiles came from the checkpoint; spawns are level geometry.
+    this.spawns = createLevel().spawns;
+    this.orderTimerMs = 0;
+    this.nextOrderId = s.orders.reduce((max, o) => Math.max(max, o.id), 0) + 1;
   }
 
   // --- roster --------------------------------------------------------------

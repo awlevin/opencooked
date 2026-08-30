@@ -2,3 +2,6 @@ node_modules/
 dist/
 .DS_Store
 .claude/
+.next/
+next-env.d.ts
+tsconfig.tsbuildinfo

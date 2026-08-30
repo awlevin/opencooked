@@ -5,6 +5,8 @@ export const metadata: Metadata = {
   title: 'Overcooked Party',
   description: 'Couch co-op cooking chaos — TV screen + phones as gamepads',
   robots: { index: false },
+  appleWebApp: { capable: true, statusBarStyle: 'black-translucent' },
+  other: { 'mobile-web-app-capable': 'yes', 'format-detection': 'telephone=no' },
 };
 
 export const viewport: Viewport = {
