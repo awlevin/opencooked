@@ -29,29 +29,52 @@ const fail = (msg: string): never => {
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 // Never hang a CI job: the whole run is a handful of seconds of real time.
-setTimeout(() => fail('the smoke test ran out of time'), 90_000).unref();
+setTimeout(() => fail('the smoke test ran out of time'), 150_000).unref();
 
 class Client {
-  ws: WebSocket;
+  ws!: WebSocket;
   inbox: S2C[] = [];
+  private opening = false;
   constructor(
     public label: string,
-    url: string = URL,
+    private url: string = URL,
   ) {
-    this.ws = new WebSocket(url);
-    this.ws.on('message', (d) => this.inbox.push(JSON.parse(d.toString()) as S2C));
-    this.ws.on('error', (e) => fail(`${label} ws error: ${e.message}`));
+    this.attach();
   }
-  // Vercel occasionally takes >8 s to complete an upgrade while scaling out;
-  // real clients ride that out with reconnect backoff, the smoke just waits.
-  async open(timeoutMs = 25000): Promise<void> {
-    await new Promise<void>((res) => {
-      const timer = setTimeout(() => fail(`${this.label}: socket never opened`), timeoutMs);
-      this.ws.once('open', () => {
-        clearTimeout(timer);
-        res();
-      });
+  private attach(): void {
+    this.opening = true;
+    this.ws = new WebSocket(this.url);
+    this.ws.on('message', (d) => this.inbox.push(JSON.parse(d.toString()) as S2C));
+    this.ws.on('error', (e) => {
+      if (!this.opening) fail(`${this.label} ws error: ${e.message}`);
     });
+  }
+  // Vercel occasionally stalls or drops an upgrade while scaling out; real
+  // clients ride that out with reconnect backoff, so the smoke retries too.
+  async open(attempts = 3, timeoutMs = 15000): Promise<void> {
+    for (let a = 1; a <= attempts; a++) {
+      const ok = await new Promise<boolean>((res) => {
+        const timer = setTimeout(() => res(false), timeoutMs);
+        this.ws.once('open', () => {
+          clearTimeout(timer);
+          res(true);
+        });
+        this.ws.once('error', () => {
+          clearTimeout(timer);
+          res(false);
+        });
+      });
+      if (ok) {
+        this.opening = false;
+        return;
+      }
+      this.ws.terminate();
+      if (a < attempts) {
+        console.log(`${this.label}: connect attempt ${a} failed, retrying`);
+        this.attach();
+      }
+    }
+    fail(`${this.label}: socket never opened after ${attempts} attempts`);
   }
   send(m: C2S): void {
     this.ws.send(JSON.stringify(m));
@@ -94,9 +117,16 @@ const j2 = await p2.expect('joined');
 if (j1.playerId === j2.playerId) fail('duplicate playerIds');
 if (!j1.token || !j2.token || j1.token === j2.token) fail('joined must carry a unique seat token');
 
-let roster = await host.expect('lobby');
-while (host.inbox.some((m) => m.t === 'lobby')) roster = await host.expect('lobby');
-if (roster.players.length !== 2) fail(`lobby roster has ${roster.players.length} players`);
+// Wait for the roster to settle at 2 — relayed joins reach the host with a
+// bus round-trip of latency, so early lobby broadcasts may still show fewer.
+{
+  let rosterN = 0;
+  const deadline = Date.now() + 8000;
+  while (rosterN !== 2) {
+    if (Date.now() > deadline) fail(`lobby roster has ${rosterN} players`);
+    rosterN = (await host.expect('lobby', 4000)).players.length;
+  }
+}
 
 // bad room join errors
 const p3 = new Client('p3');
