@@ -42,7 +42,9 @@ class Client {
     this.ws.on('message', (d) => this.inbox.push(JSON.parse(d.toString()) as S2C));
     this.ws.on('error', (e) => fail(`${label} ws error: ${e.message}`));
   }
-  async open(timeoutMs = 8000): Promise<void> {
+  // Vercel occasionally takes >8 s to complete an upgrade while scaling out;
+  // real clients ride that out with reconnect backoff, the smoke just waits.
+  async open(timeoutMs = 25000): Promise<void> {
     await new Promise<void>((res) => {
       const timer = setTimeout(() => fail(`${this.label}: socket never opened`), timeoutMs);
       this.ws.once('open', () => {
