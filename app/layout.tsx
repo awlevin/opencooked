@@ -2,9 +2,9 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
+  metadataBase: new URL('https://overcooked-bay.vercel.app'),
   title: 'Overcooked Party',
   description: 'Couch co-op cooking chaos — TV screen + phones as gamepads',
-  robots: { index: false },
   appleWebApp: { capable: true, statusBarStyle: 'black-translucent' },
   other: { 'mobile-web-app-capable': 'yes', 'format-detection': 'telephone=no' },
 };

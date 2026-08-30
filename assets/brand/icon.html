@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Overcooked Party — icon 512×512</title>
+    <link rel="stylesheet" href="./brand.css" />
+    <style>
+      .frame {
+        width: 512px;
+        height: 512px;
+      }
+      /* Backdrop is recentred so the glow sits behind the chef, not off-frame. */
+      .backdrop {
+        background: radial-gradient(
+          92% 92% at 50% 22%,
+          #8a4720 0%,
+          #4a2412 46%,
+          #23140c 100%
+        );
+      }
+      .backdrop::after {
+        background: repeating-linear-gradient(
+          -45deg,
+          rgba(255, 226, 168, 0.055) 0 14px,
+          rgba(0, 0, 0, 0) 14px 40px
+        );
+      }
+    </style>
+  </head>
+  <body>
+    <div class="frame" id="frame">
+      <div class="backdrop"></div>
+      <canvas class="art" id="art"></canvas>
+    </div>
+
+    <script type="module">
+      import { drawChef } from './kitchen.js';
+
+      const W = 512;
+      const S = 2;
+
+      const cv = document.getElementById('art');
+      cv.width = W * S;
+      cv.height = W * S;
+      cv.style.width = W + 'px';
+      cv.style.height = W + 'px';
+      const c = cv.getContext('2d');
+      c.scale(S, S);
+
+      // Vignette: darkens the corners so the chef's cocoa outline still
+      // separates from the frame when the icon is 32px on a light toolbar.
+      const v = c.createRadialGradient(256, 280, 130, 256, 280, 360);
+      v.addColorStop(0, 'rgba(20, 11, 6, 0)');
+      v.addColorStop(1, 'rgba(16, 9, 4, 0.72)');
+      c.fillStyle = v;
+      c.fillRect(0, 0, W, W);
+
+      // Warm halo directly behind the body, so the red reads hot rather than
+      // muddy against the brown.
+      const halo = c.createRadialGradient(256, 292, 40, 256, 292, 210);
+      halo.addColorStop(0, 'rgba(255, 155, 61, 0.42)');
+      halo.addColorStop(1, 'rgba(255, 155, 61, 0)');
+      c.fillStyle = halo;
+      c.fillRect(0, 0, W, W);
+
+      // One chef, tomato red, looking straight at you. Sized for a 32px
+      // downscale: big enough to fill the tile, with clearance for the hat.
+      drawChef(c, 256, 300, { r: 138, color: '#e74c3c', angle: Math.PI / 2 });
+
+      document.body.dataset.ready = '1';
+    </script>
+  </body>
+</html>

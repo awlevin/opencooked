@@ -1,0 +1,4 @@
+node_modules/
+# Raw footage and its Remotion-visible copy are re-creatable: `npm run capture`.
+captures/
+public/

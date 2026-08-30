@@ -47,7 +47,14 @@ function pathOf(req: IncomingMessage): string {
   return q < 0 ? raw : raw.slice(0, q);
 }
 
-const app = next({ dev });
+// On the first HTTP request, Next's custom-server wrapper quietly adds its own
+// 'upgrade' listener to whatever server it can reach (`options.httpServer`, or
+// `req.socket.server`). That listener answers /api/ws too, and ends the socket
+// right after our handshake — the client sees a 1006 before the first frame.
+// Handing Next a decoy server parks that listener somewhere harmless; we still
+// drive Next's HMR upgrades ourselves through `getUpgradeHandler()` below.
+const decoyForNextsUpgradeListener = createServer();
+const app = next({ dev, httpServer: decoyForNextsUpgradeListener });
 await app.prepare();
 const handle = app.getRequestHandler();
 // Only valid after prepare(); Next serves its own HMR socket through it.

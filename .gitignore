@@ -2,6 +2,9 @@ node_modules/
 dist/
 .DS_Store
 .claude/
+.agents/
+# Working notes, plans and review scratch — not for the public repo.
+.private/
 .next/
 next-env.d.ts
 tsconfig.tsbuildinfo

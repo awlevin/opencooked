@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Overcooked Party — open graph 1200×630</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;600;700;800&display=block"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./brand.css" />
+    <style>
+      .frame {
+        width: 1200px;
+        height: 630px;
+        --edge-w: 8px;
+        --rule-w: 3px;
+      }
+      .blob.b1 {
+        width: 620px;
+        height: 620px;
+        left: -180px;
+        top: -160px;
+        background: #ff9b3d;
+        opacity: 0.32;
+      }
+      .blob.b2 {
+        width: 560px;
+        height: 560px;
+        right: -120px;
+        bottom: -280px;
+        background: #e8503a;
+        opacity: 0.34;
+      }
+      .blob.b3 {
+        width: 380px;
+        height: 380px;
+        right: 250px;
+        top: -220px;
+        background: #ffd23f;
+        opacity: 0.22;
+      }
+
+      .lockup {
+        position: absolute;
+        left: 72px;
+        top: 104px;
+        width: 720px;
+      }
+      .kicker {
+        font-size: 26px;
+        margin-bottom: 18px;
+      }
+      .title h1 {
+        font-size: 112px;
+      }
+      .sub {
+        font-size: 48px;
+        margin-top: 18px;
+      }
+      .tagline {
+        font-size: 48px;
+        margin-top: 40px;
+        line-height: 1.22;
+      }
+
+      /* Lobby "scan to play" card, same tilt as host.css .qr-card. */
+      .qr-card {
+        right: 96px;
+        top: 62px;
+        transform: rotate(1.4deg);
+        padding: 14px 14px 18px;
+        border-radius: 24px;
+        border-width: 4px;
+        box-shadow: 0 11px 0 rgba(29, 16, 9, 0.55);
+        gap: 8px;
+      }
+      .qr-card .card-label {
+        font-size: 18px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="frame" id="frame">
+      <div class="backdrop">
+        <div class="blob b1"></div>
+        <div class="blob b2"></div>
+        <div class="blob b3"></div>
+      </div>
+
+      <canvas class="art" id="art"></canvas>
+
+      <div class="lockup">
+        <div class="kicker">Get your aprons on</div>
+        <div class="title">
+          <h1>OVER<span class="hot">COOKED</span></h1>
+        </div>
+        <div class="sub">PARTY</div>
+        <div class="tagline">
+          Your <b>TV</b> is the kitchen.<br />Your <b>phones</b> are the
+          controllers.
+        </div>
+      </div>
+
+      <div class="card qr-card">
+        <div class="card-label">Scan to play</div>
+        <div class="qr-frame"><canvas id="qr"></canvas></div>
+      </div>
+
+      <div class="edge"></div>
+    </div>
+
+    <script type="module">
+      import {
+        PAL,
+        drawChef,
+        drawChefHeld,
+        drawFakeQr,
+        drawPot,
+        drawWhole,
+        ellipse,
+        fillStroke,
+      } from './kitchen.js';
+
+      const W = 1200;
+      const H = 630;
+      const S = 2;
+
+      const cv = document.getElementById('art');
+      cv.width = W * S;
+      cv.height = H * S;
+      cv.style.width = W + 'px';
+      cv.style.height = H + 'px';
+      const c = cv.getContext('2d');
+      c.scale(S, S);
+
+      /* Decorative QR inside the lobby-style card. Encodes nothing. */
+      const QR = 168;
+      const qc = document.getElementById('qr');
+      qc.width = QR * S;
+      qc.height = QR * S;
+      qc.style.width = QR + 'px';
+      qc.style.height = QR + 'px';
+      drawFakeQr(qc.getContext('2d'), 0, 0, QR * S, { modules: 25 });
+
+      /* --- kitchen huddle, sitting clear below the card --- */
+      const chefs = [
+        {
+          x: 838,
+          y: 474,
+          r: 58,
+          color: '#e74c3c',
+          angle: 1.24,
+          held: { kind: 'ing', type: 'tomato' },
+          deferHeld: true,
+        },
+        {
+          x: 1114,
+          y: 474,
+          r: 58,
+          color: '#3498db',
+          angle: 1.9,
+          held: { kind: 'plate', soup: ['tomato', 'onion'] },
+          deferHeld: true,
+        },
+      ];
+      for (const p of chefs) drawChef(c, p.x, p.y, p);
+
+      // counter
+      ellipse(c, 976, 566, 214, 46);
+      c.fillStyle = 'rgba(20, 11, 6, 0.45)';
+      c.fill();
+      ellipse(c, 976, 554, 214, 46);
+      fillStroke(c, '#c98a4b', PAL.ink, 5);
+      ellipse(c, 976, 546, 192, 30);
+      fillStroke(c, '#d99f5f', null, 0);
+
+      drawPot(c, 976, 498, 172, ['tomato', 'onion', 'mushroom'], 0.42);
+      drawWhole(c, 'onion', 918, 572, 21);
+      drawWhole(c, 'mushroom', 1042, 578, 19);
+
+      // Held items last, so the counter cannot swallow them.
+      for (const p of chefs) drawChefHeld(c, p.x, p.y, p);
+
+      document.body.dataset.ready = '1';
+    </script>
+  </body>
+</html>

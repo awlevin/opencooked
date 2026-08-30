@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Overcooked Party — banner 2400×800</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;600;700;800&display=block"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./brand.css" />
+    <style>
+      .frame {
+        width: 2400px;
+        height: 800px;
+        --edge-w: 12px;
+        --rule-w: 4px;
+      }
+      .blob.b1 {
+        width: 900px;
+        height: 900px;
+        left: -220px;
+        top: -180px;
+        background: #ff9b3d;
+        opacity: 0.3;
+      }
+      .blob.b2 {
+        width: 820px;
+        height: 820px;
+        right: 40px;
+        bottom: -420px;
+        background: #e8503a;
+        opacity: 0.34;
+      }
+      .blob.b3 {
+        width: 560px;
+        height: 560px;
+        right: 620px;
+        top: -300px;
+        background: #ffd23f;
+        opacity: 0.2;
+      }
+
+      .lockup {
+        position: absolute;
+        left: 132px;
+        top: 0;
+        height: 800px;
+        width: 1230px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: flex-start;
+      }
+      .kicker {
+        font-size: 32px;
+        margin-bottom: 22px;
+      }
+      .title h1 {
+        font-size: 176px;
+      }
+      .sub {
+        font-size: 68px;
+        margin-top: 22px;
+      }
+      .tagline {
+        font-size: 42px;
+        margin-top: 38px;
+        line-height: 1.25;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="frame" id="frame">
+      <div class="backdrop">
+        <div class="blob b1"></div>
+        <div class="blob b2"></div>
+        <div class="blob b3"></div>
+      </div>
+
+      <canvas class="art" id="art"></canvas>
+
+      <div class="lockup">
+        <div class="kicker">Get your aprons on</div>
+        <div class="title">
+          <h1>OVER<span class="hot">COOKED</span></h1>
+        </div>
+        <div class="sub">PARTY</div>
+        <div class="tagline">
+          Your <b>TV</b> is the kitchen. Your <b>phones</b> are the controllers.
+        </div>
+      </div>
+
+      <div class="edge"></div>
+    </div>
+
+    <script type="module">
+      import {
+        PAL,
+        drawChef,
+        drawChefHeld,
+        drawPot,
+        drawTicket,
+        drawWhole,
+        ellipse,
+        fillStroke,
+      } from './kitchen.js';
+
+      const W = 2400;
+      const H = 800;
+      const S = 2; // supersample: canvas backing store is 2× the export size
+
+      const cv = document.getElementById('art');
+      cv.width = W * S;
+      cv.height = H * S;
+      cv.style.width = W + 'px';
+      cv.style.height = H + 'px';
+      const c = cv.getContext('2d');
+      c.scale(S, S);
+
+      /* --- counter the whole scene stands behind --- */
+      function counter(x, y, rx, ry) {
+        ellipse(c, x, y + 18, rx, ry);
+        c.fillStyle = 'rgba(20, 11, 6, 0.45)';
+        c.fill();
+        ellipse(c, x, y, rx, ry);
+        fillStroke(c, '#c98a4b', PAL.ink, 7);
+        ellipse(c, x, y - ry * 0.16, rx * 0.9, ry * 0.66);
+        fillStroke(c, '#d99f5f', null, 0);
+      }
+
+      // Order tickets frame the top of the huddle. Kept clear of the
+      // wordmark, whose right edge is measured below.
+      drawTicket(c, 1372, 78, 252, 228, ['tomato', 'onion'], 3.05, 0.075, 0.74);
+      drawTicket(c, 2116, 62, 236, 214, ['mushroom', 'tomato'], 2.9, -0.055, 0.34);
+
+      /* --- back row of chefs, standing behind the counter --- */
+      const back = [
+        { x: 1726, y: 452, r: 78, color: '#2ecc71', angle: 1.86 },
+        { x: 2036, y: 452, r: 78, color: '#f1c40f', angle: 1.3 },
+      ];
+      for (const b of back) drawChef(c, b.x, b.y, b);
+
+      /* --- counter + the pot on it --- */
+      counter(1880, 604, 420, 82);
+      drawPot(c, 1880, 522, 306, ['tomato', 'onion', 'mushroom'], 0.42);
+
+      /* --- ingredient glyphs resting on the counter --- */
+      drawWhole(c, 'onion', 1650, 576, 44);
+      drawWhole(c, 'mushroom', 1746, 598, 36);
+      drawWhole(c, 'tomato', 2076, 582, 42);
+
+      /* --- front pair, at the near side of the counter, turned inward so
+             what they carry lands on the counter rather than the floor --- */
+      const front = [
+        {
+          x: 1512,
+          y: 546,
+          r: 96,
+          color: '#e74c3c',
+          angle: 0.72,
+          held: { kind: 'ing', type: 'tomato' },
+          deferHeld: true,
+        },
+        {
+          x: 2242,
+          y: 546,
+          r: 96,
+          color: '#3498db',
+          angle: Math.PI - 0.72,
+          held: { kind: 'plate', soup: ['tomato', 'onion', 'mushroom'] },
+          deferHeld: true,
+        },
+      ];
+      for (const f of front) drawChef(c, f.x, f.y, f);
+      // Held items last: the counter must not swallow them.
+      for (const f of front) drawChefHeld(c, f.x, f.y, f);
+
+      document.body.dataset.ready = '1';
+    </script>
+  </body>
+</html>

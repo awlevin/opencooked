@@ -1,0 +1,14 @@
+{
+  "name": "overcooked-brand",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Self-contained generator for the Overcooked Party brand assets. Independent of the root app; the root package.json is intentionally untouched.",
+  "scripts": {
+    "generate": "node generate.mjs",
+    "postinstall": "playwright install chromium"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
+  }
+}

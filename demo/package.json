@@ -1,0 +1,33 @@
+{
+  "name": "overcooked-party-demo",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Launch demo video for Overcooked Party: Playwright capture of a real round + a Remotion edit.",
+  "scripts": {
+    "capture": "tsx capture/capture.ts",
+    "render": "remotion render src/index.ts Demo out/demo.mp4",
+    "gif": "tsx capture/make-gif.ts",
+    "studio": "remotion studio src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.410",
+    "@remotion/google-fonts": "4.0.410",
+    "@remotion/transitions": "4.0.410",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "remotion": "4.0.410"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "ffmpeg-static": "^5.2.0",
+    "ffprobe-static": "^3.1.0",
+    "playwright": "^1.49.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "ws": "^8.18.0"
+  }
+}

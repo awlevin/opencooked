@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: typecheck, build, smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      # No Redis: a single process uses the in-memory registry and bus, which
+      # covers everything the smoke test asserts. The cross-instance path
+      # (CROSS_PORTS) needs two processes plus Redis and is run locally.
+      - name: Start the server
+        run: |
+          # Detach stdout/stderr to a log file: a background process holding
+          # the step's pipes open would stall the runner.
+          PORT=3123 NODE_ENV=production npx tsx server/local.ts > /tmp/server.log 2>&1 &
+          echo "SERVER_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 60); do
+            if curl -sf -o /dev/null "http://127.0.0.1:3123/"; then
+              echo "server is up after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "server never came up on :3123"
+          cat /tmp/server.log
+          exit 1
+
+      - name: Smoke test
+        run: PORT=3123 npm run smoke
+
+      - name: Server log
+        if: failure()
+        run: cat /tmp/server.log || true
+
+      - name: Stop the server
+        if: always()
+        run: kill "$SERVER_PID" 2>/dev/null || true
