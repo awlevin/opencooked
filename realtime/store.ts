@@ -84,8 +84,11 @@ export type InEnvelope =
 /** Owner -> one proxy. `connId` guards against a stale proxy for the seat. */
 export type OutEnvelope =
   | { k: 'send'; connId: string; msg: S2C }
-  /** The proxy now also answers to `out:<playerId>`. */
-  | { k: 'bind'; connId: string; playerId: string }
+  /**
+   * The proxy now also answers to `out:<playerId>`. `owner` tells it which
+   * instance holds its seat, so it knows to re-announce when that changes.
+   */
+  | { k: 'bind'; connId: string; playerId: string; owner: string }
   | { k: 'close'; connId: string; msg?: S2C };
 
 /** Owner -> every proxy in the room. */

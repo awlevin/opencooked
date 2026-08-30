@@ -5,6 +5,12 @@
 //   npx tsx scripts/smoke.ts
 //   PORT=3199 npx tsx scripts/smoke.ts
 //   WS_URL=wss://example.vercel.app/api/ws npx tsx scripts/smoke.ts
+//
+// Set CROSS_PORTS to two ports served by two processes that share one Redis
+// (REDIS_URL) to also check the multi-instance path — bus relay and the
+// ownership handover a Vercel host reconnect causes:
+//
+//   PORT=3131 CROSS_PORTS=3131,3132 npx tsx scripts/smoke.ts
 
 import WebSocket from 'ws';
 
@@ -28,8 +34,11 @@ setTimeout(() => fail('the smoke test ran out of time'), 90_000).unref();
 class Client {
   ws: WebSocket;
   inbox: S2C[] = [];
-  constructor(public label: string) {
-    this.ws = new WebSocket(URL);
+  constructor(
+    public label: string,
+    url: string = URL,
+  ) {
+    this.ws = new WebSocket(url);
     this.ws.on('message', (d) => this.inbox.push(JSON.parse(d.toString()) as S2C));
     this.ws.on('error', (e) => fail(`${label} ws error: ${e.message}`));
   }
@@ -198,8 +207,100 @@ console.log(
     `${Math.round(s2.msLeft)}, score ${s2.score})`,
 );
 
-console.log(
-  'PASS: lobby, join/err, start, snapshots, movement, orders, ' +
-    'controller reclaim, host resume all OK',
-);
+// --- cross-instance: two processes, one Redis (opt-in) ---------------------
+
+/**
+ * The Vercel shape of the game: the host's room runs on one instance, a phone
+ * lands on another, and the host's socket eventually dies and comes back
+ * somewhere else. The room must follow the host, and the phone must keep its
+ * chef without reconnecting.
+ */
+async function crossInstanceCheck(portA: number, portB: number): Promise<void> {
+  const urlA = `ws://localhost:${portA}${WS_PATH}`;
+  const urlB = `ws://localhost:${portB}${WS_PATH}`;
+
+  const hostA = new Client('cross-host', urlA);
+  await hostA.open();
+  hostA.send({ t: 'hello-host' });
+  const xr = await hostA.expect('room');
+
+  // The phone talks to a process that has never heard of this room.
+  const phone = new Client('cross-phone', urlB);
+  await phone.open();
+  phone.send({ t: 'join', room: xr.code, name: 'Remote Rita' });
+  const seat = await phone.expect('joined', 8000);
+
+  let seen = await hostA.expect('lobby');
+  while (!seen.players.some((p) => p.name === 'Remote Rita')) seen = await hostA.expect('lobby');
+
+  phone.send({ t: 'start' });
+  await hostA.expect('phase');
+  const x0 = await hostA.freshState();
+  if (x0.phase !== 'playing') fail(`relayed start gave phase ${x0.phase}`);
+  const spawn = { ...x0.players.find((p) => p.id === seat.playerId)!.pos };
+
+  phone.send({ t: 'input', move: { x: 1, y: 0 } });
+  await sleep(700);
+  phone.send({ t: 'input', move: { x: 0, y: 0 } });
+  await sleep(300);
+  const x1 = await hostA.freshState();
+  const walked = x1.players.find((p) => p.id === seat.playerId)!.pos;
+  if (Math.hypot(walked.x - spawn.x, walked.y - spawn.y) < 0.5) {
+    fail('relayed input did not move the chef');
+  }
+  console.log(`cross-instance relay ok (${seat.playerId} joined on B, drives on A)`);
+
+  // The host's function dies on A and the page reconnects to B.
+  hostA.ws.close();
+  await sleep(800);
+  const hostB = new Client('cross-host-2', urlB);
+  await hostB.open();
+  hostB.send({ t: 'hello-host', resume: { room: xr.code } });
+  const resumed = await hostB.expect('room', 8000);
+  if (resumed.code !== xr.code) fail('cross-instance resume gave a different code');
+  if (resumed.resumed !== true) fail('cross-instance resume did not answer resumed:true');
+  const x2 = await hostB.expect('state', 8000).then((m) => m.s);
+  if (x2.phase !== 'playing') fail('the round did not survive the handover');
+  if (x2.msLeft > ROUND_MS - 1000) fail(`msLeft reset on the handover (${x2.msLeft})`);
+  if (x2.msLeft > x1.msLeft) fail('the clock went backwards on the handover');
+  console.log(`cross-instance handover ok (msLeft ${Math.round(x2.msLeft)})`);
+
+  // The phone never reconnected: its seat must have followed the room to B.
+  // Walk back the way it came — the chef is parked next to the counter island,
+  // so only the corridor it just crossed is guaranteed to be open floor.
+  const from = { ...x2.players.find((p) => p.id === seat.playerId)!.pos };
+  phone.send({ t: 'input', move: { x: -1, y: 0 } });
+  await sleep(700);
+  phone.send({ t: 'input', move: { x: 0, y: 0 } });
+  await sleep(300);
+  const x3 = await hostB.freshState();
+  const to = x3.players.find((p) => p.id === seat.playerId)!.pos;
+  if (Math.hypot(to.x - from.x, to.y - from.y) < 0.5) {
+    fail('the relayed controller lost its chef after the handover');
+  }
+  console.log('cross-instance controller kept its chef through the handover');
+
+  hostB.ws.close();
+  phone.ws.close();
+}
+
+const crossPorts = (process.env.CROSS_PORTS ?? '')
+  .split(',')
+  .map((s) => Number(s.trim()))
+  .filter((n) => Number.isInteger(n) && n > 0);
+
+if (crossPorts.length === 2) {
+  await crossInstanceCheck(crossPorts[0], crossPorts[1]);
+  console.log(
+    'PASS: lobby, join/err, start, snapshots, movement, orders, controller reclaim, ' +
+      'host resume, cross-instance relay + handover all OK',
+  );
+} else if (crossPorts.length > 0) {
+  fail('CROSS_PORTS needs exactly two ports, e.g. CROSS_PORTS=3131,3132');
+} else {
+  console.log(
+    'PASS: lobby, join/err, start, snapshots, movement, orders, ' +
+      'controller reclaim, host resume all OK',
+  );
+}
 process.exit(0);

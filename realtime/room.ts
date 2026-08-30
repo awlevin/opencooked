@@ -230,16 +230,18 @@ export class Room {
     this.publishAll({ k: 'owner', owner: this.ctx.instanceId });
   }
 
-  /** Stop acting as the bus owner (we no longer run the sim for others). */
+  /**
+   * Stop acting as the bus owner: we no longer run the sim for anyone else.
+   *
+   * Relayed controllers are deliberately left connected. Their phones belong
+   * to the room, not to this process, and hanging them up on every host
+   * reconnect (which on Vercel is every few minutes) would be a disaster.
+   * They keep their seats and re-announce themselves to whichever instance
+   * picks the room up next — see RemoteAttachment's owner handling.
+   */
   private stopOwning(): void {
     this.unsubIn?.();
     this.unsubIn = null;
-    for (const link of this.remoteLinks.values()) {
-      const pid = this.byConn.get(link.id);
-      if (pid) this.dropSeatLink(pid, link.id);
-      link.close({ t: 'err', msg: 'Reconnecting…' });
-    }
-    this.remoteLinks.clear();
   }
 
   // --- roster --------------------------------------------------------------
@@ -657,7 +659,7 @@ export class Room {
   private remoteLink(connId: string): RemoteLink {
     let link = this.remoteLinks.get(connId);
     if (!link) {
-      link = new RemoteLink(connId, this.code, this.ctx.bus);
+      link = new RemoteLink(connId, this.code, this.ctx.bus, this.ctx.instanceId);
       this.remoteLinks.set(connId, link);
     }
     return link;

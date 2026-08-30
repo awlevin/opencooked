@@ -46,13 +46,14 @@ export class RemoteLink implements Link {
     readonly id: string,
     private readonly code: string,
     private readonly bus: Bus,
+    private readonly owner: string,
   ) {
     this.addr = id;
   }
 
-  /** Ask the proxy to also listen on `out:<playerId>`. */
+  /** Ask the proxy to also listen on `out:<playerId>`, and name its owner. */
   requestBind(playerId: string): void {
-    this.emit({ k: 'bind', connId: this.id, playerId });
+    this.emit({ k: 'bind', connId: this.id, playerId, owner: this.owner });
   }
 
   /** Called after the proxy confirms it subscribed to `out:<playerId>`. */
