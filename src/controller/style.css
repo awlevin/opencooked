@@ -1,0 +1,916 @@
+/* Overcooked Party — phone controller.
+   Dark plastic gamepad. The player colour arrives from the server and lands on
+   --accent (see theme.ts), so every screen tints to match the chef on the TV. */
+
+:root {
+  --bg: #070910;
+  --panel: #131824;
+  --panel-hi: #1c2333;
+  --edge: #2a3244;
+  --ink: #f4f7fd;
+  --muted: #8d97ae;
+
+  --accent: #f1c40f;
+  --accent-bright: #f6d75c;
+  --accent-deep: #856b08;
+  --accent-shadow: #433605;
+  --accent-wash: #1b1704;
+  --accent-glow: rgba(241, 196, 15, 0.42);
+  --accent-faint: rgba(241, 196, 15, 0.16);
+  --accent-hairline: rgba(241, 196, 15, 0.32);
+
+  --btn: clamp(96px, min(28vw, 30vh), 168px);
+  --pad-x: max(14px, env(safe-area-inset-left));
+  --pad-r: max(14px, env(safe-area-inset-right));
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: ui-rounded, 'SF Pro Rounded', 'Avenir Next', 'Segoe UI', system-ui, sans-serif;
+  font-weight: 700;
+  -webkit-text-size-adjust: 100%;
+  text-rendering: optimizeLegibility;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+  height: 100dvh;
+  background:
+    radial-gradient(120% 80% at 50% -20%, var(--accent-wash) 0%, transparent 62%),
+    radial-gradient(90% 60% at 50% 120%, #0d1220 0%, transparent 70%),
+    var(--bg);
+  transition: background 320ms ease;
+}
+
+.stage {
+  position: absolute;
+  inset: 0;
+  padding:
+    max(12px, env(safe-area-inset-top)) var(--pad-r)
+    max(16px, env(safe-area-inset-bottom)) var(--pad-x);
+}
+
+.screen {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  animation: fade-in 220ms ease both;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ------------------------------- typography ------------------------------ */
+
+.title {
+  margin: 0;
+  font-size: clamp(24px, 6vw, 40px);
+  letter-spacing: 0.01em;
+  text-align: center;
+}
+
+.msg {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+  line-height: 1.4;
+}
+
+.msg--error {
+  color: #ff8a80;
+}
+
+/* ---------------------------------- join --------------------------------- */
+
+.screen--join {
+  justify-content: center;
+  align-items: center;
+}
+
+.card {
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 22px 20px 24px;
+  border-radius: 26px;
+  background: linear-gradient(180deg, var(--panel-hi), var(--panel));
+  border: 1px solid var(--edge);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  overflow-y: auto;
+  max-height: 100%;
+  scrollbar-width: none;
+}
+
+.card::-webkit-scrollbar,
+.roster-wrap::-webkit-scrollbar {
+  display: none;
+}
+
+.brand {
+  font-size: 13px;
+  letter-spacing: 0.42em;
+  color: var(--accent);
+  text-align: center;
+  margin-right: -0.42em;
+}
+
+.brand__sub {
+  margin-top: -6px;
+  margin-right: -0.3em;
+  font-size: 30px;
+  letter-spacing: 0.3em;
+  text-align: center;
+  color: var(--ink);
+}
+
+.room-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 14px;
+  border-radius: 18px;
+  background: var(--accent-faint);
+  border: 1px solid var(--accent-hairline);
+}
+
+.room-badge__label {
+  font-size: 11px;
+  letter-spacing: 0.28em;
+  color: var(--accent-bright);
+  margin-right: -0.28em;
+}
+
+.room-badge__code {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: clamp(38px, 12vw, 56px);
+  letter-spacing: 0.14em;
+  margin-right: -0.14em;
+  color: var(--ink);
+  text-shadow: 0 0 22px var(--accent-glow);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field__label {
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  color: var(--muted);
+}
+
+.input {
+  width: 100%;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid var(--edge);
+  border-radius: 16px;
+  background: #0c111c;
+  color: var(--ink);
+  font: inherit;
+  font-size: 20px;
+  padding: 15px 16px;
+  outline: none;
+  touch-action: manipulation;
+  user-select: text;
+  -webkit-user-select: text;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.input::placeholder {
+  color: #4c566d;
+}
+
+.input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-faint);
+}
+
+.input--code {
+  text-align: center;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 34px;
+  letter-spacing: 0.28em;
+  padding-left: 0.28em;
+  text-transform: uppercase;
+}
+
+/* ------------------------------- big button ------------------------------ */
+
+.big-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  width: 100%;
+  min-height: 68px;
+  border-radius: 20px;
+  font: inherit;
+  font-size: 22px;
+  letter-spacing: 0.14em;
+  margin-right: -0.14em;
+  color: #10131c;
+  background: linear-gradient(180deg, var(--accent-bright), var(--accent));
+  box-shadow:
+    0 8px 0 var(--accent-deep),
+    0 14px 28px var(--accent-glow);
+  touch-action: manipulation;
+  transition:
+    transform 90ms ease,
+    box-shadow 90ms ease,
+    filter 160ms ease;
+}
+
+.big-btn--hero {
+  min-height: 84px;
+  font-size: 26px;
+  border-radius: 24px;
+}
+
+.big-btn:active:not(:disabled) {
+  transform: translateY(6px);
+  box-shadow:
+    0 2px 0 var(--accent-deep),
+    0 6px 14px var(--accent-glow);
+}
+
+.big-btn:disabled {
+  filter: grayscale(0.7) brightness(0.72);
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.4);
+}
+
+/* --------------------------------- lobby --------------------------------- */
+
+.screen--lobby {
+  justify-content: space-between;
+  gap: 14px;
+  padding-top: 10px;
+}
+
+.lobby-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.chef-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 18px 8px 10px;
+  border-radius: 999px;
+  background: var(--accent-faint);
+  border: 1px solid var(--accent-hairline);
+}
+
+.chef-chip__dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 3px rgba(255, 255, 255, 0.12),
+    0 0 18px var(--accent-glow);
+}
+
+.chef-chip__name {
+  font-size: 19px;
+  letter-spacing: 0.02em;
+}
+
+.roster-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: safe center;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  padding: 4px 2px;
+  scrollbar-width: none;
+}
+
+.roster__count {
+  font-size: 11px;
+  letter-spacing: 0.24em;
+  color: var(--muted);
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+.roster {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.roster__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  font-size: 16px;
+  min-width: 0;
+}
+
+.roster__item.is-me {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, var(--panel-hi), var(--panel));
+  box-shadow: 0 0 0 1px var(--accent-hairline);
+}
+
+.roster__dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex: none;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1);
+}
+
+.roster__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.roster__empty {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 14px;
+  padding: 12px 2px;
+}
+
+/* -------------------------------- gameover ------------------------------- */
+
+.screen--over {
+  justify-content: center;
+  align-items: center;
+  gap: 18px;
+  text-align: center;
+}
+
+.score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.score__label {
+  font-size: 11px;
+  letter-spacing: 0.32em;
+  color: var(--muted);
+  margin-right: -0.32em;
+}
+
+.score__value {
+  font-size: clamp(64px, 22vw, 128px);
+  line-height: 1;
+  color: var(--accent);
+  text-shadow: 0 0 40px var(--accent-glow);
+}
+
+.stats {
+  display: flex;
+  gap: 12px;
+}
+
+.stat {
+  min-width: 108px;
+  padding: 12px 18px;
+  border-radius: 18px;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stat__value {
+  font-size: 30px;
+}
+
+.stat__label {
+  font-size: 10px;
+  letter-spacing: 0.24em;
+  color: var(--muted);
+  margin-right: -0.24em;
+}
+
+.screen--over .big-btn {
+  width: min(420px, 100%);
+}
+
+/* --------------------------------- gamepad ------------------------------- */
+
+.screen--pad {
+  position: relative;
+  padding: 0;
+}
+
+.pad-hud {
+  position: absolute;
+  top: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 14px 5px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--edge);
+  pointer-events: none;
+  z-index: 2;
+  max-width: 60%;
+}
+
+.pad-hud__dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent-glow);
+  flex: none;
+}
+
+.pad-hud__name {
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pad {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+}
+
+/* left half — floating joystick */
+
+.stick-zone {
+  position: relative;
+  flex: 1 1 50%;
+  touch-action: none;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+  background: radial-gradient(70% 55% at 50% 55%, rgba(255, 255, 255, 0.03), transparent 70%);
+}
+
+.stick-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  transition: opacity 180ms ease;
+  pointer-events: none;
+}
+
+.stick-hint.is-hidden {
+  opacity: 0;
+}
+
+.stick-hint__ring {
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  border: 2px dashed rgba(255, 255, 255, 0.14);
+}
+
+.stick-hint__label {
+  font-size: 11px;
+  letter-spacing: 0.34em;
+  color: rgba(255, 255, 255, 0.24);
+  margin-right: -0.34em;
+}
+
+.stick {
+  position: absolute;
+  width: 176px;
+  height: 176px;
+  margin: -88px 0 0 -88px;
+  border-radius: 50%;
+  opacity: 0;
+  transform: scale(0.85);
+  transition:
+    opacity 130ms ease,
+    transform 130ms ease;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.05), rgba(0, 0, 0, 0.4) 72%);
+  border: 1px solid var(--accent-hairline);
+  box-shadow:
+    inset 0 6px 20px rgba(0, 0, 0, 0.6),
+    0 0 34px var(--accent-glow);
+}
+
+.stick.is-active {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.stick__ring {
+  position: absolute;
+  inset: 24px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.stick__thumb {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: linear-gradient(180deg, var(--accent-bright), var(--accent-deep));
+  box-shadow:
+    inset 0 2px 2px rgba(255, 255, 255, 0.45),
+    inset 0 -6px 12px rgba(0, 0, 0, 0.35),
+    0 6px 18px rgba(0, 0, 0, 0.5),
+    0 0 26px var(--accent-glow);
+}
+
+/* right half — action buttons */
+
+.btn-zone {
+  position: relative;
+  flex: 1 1 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: clamp(14px, 3.5vmin, 28px);
+  padding-right: clamp(12px, 5%, 34px);
+  touch-action: none;
+}
+
+/* Diagonal cluster: CHOP sits up-and-left of GRAB, on the thumb's natural arc. */
+.pad-btn--b {
+  margin-right: calc(var(--btn) * 0.38);
+}
+
+.pad-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  width: var(--btn);
+  height: var(--btn);
+  border-radius: 50%;
+  font: inherit;
+  color: #0d1017;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  touch-action: none;
+  transition:
+    transform 70ms ease,
+    box-shadow 70ms ease,
+    filter 70ms ease;
+}
+
+.pad-btn__label {
+  font-size: clamp(17px, 4.6vmin, 26px);
+  letter-spacing: 0.06em;
+  line-height: 1;
+}
+
+.pad-btn__sub {
+  font-size: clamp(9px, 2.2vmin, 12px);
+  letter-spacing: 0.2em;
+  margin-right: -0.2em;
+  opacity: 0.55;
+  line-height: 1;
+}
+
+.pad-btn--a {
+  background: linear-gradient(180deg, var(--accent-bright), var(--accent));
+  box-shadow:
+    0 10px 0 var(--accent-deep),
+    0 18px 34px var(--accent-glow),
+    inset 0 2px 3px rgba(255, 255, 255, 0.5);
+}
+
+.pad-btn--b {
+  color: var(--ink);
+  background: linear-gradient(180deg, #39435c, #232b3d);
+  box-shadow:
+    0 10px 0 #141a27,
+    0 18px 30px rgba(0, 0, 0, 0.5),
+    inset 0 2px 3px rgba(255, 255, 255, 0.16);
+}
+
+.pad-btn--b .pad-btn__sub {
+  opacity: 0.75;
+  color: var(--accent-bright);
+}
+
+.pad-btn.is-pressed,
+.pad-btn:active {
+  transform: translateY(8px) scale(0.96);
+  filter: brightness(1.2) saturate(1.15);
+}
+
+.pad-btn.is-pressed .pad-btn__label,
+.pad-btn:active .pad-btn__label {
+  transform: scale(0.96);
+}
+
+.pad-btn__label {
+  transition: transform 70ms ease;
+}
+
+.pad-btn--a.is-pressed,
+.pad-btn--a:active {
+  box-shadow:
+    0 2px 0 var(--accent-deep),
+    0 4px 12px var(--accent-glow),
+    inset 0 3px 10px rgba(0, 0, 0, 0.3);
+}
+
+.pad-btn--b.is-pressed,
+.pad-btn--b:active {
+  box-shadow:
+    0 2px 0 #141a27,
+    0 4px 12px rgba(0, 0, 0, 0.5),
+    inset 0 3px 10px rgba(0, 0, 0, 0.45);
+}
+
+/* --------------------------------- overlay ------------------------------- */
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 7, 12, 0.82);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+}
+
+.overlay.is-shown {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.overlay__box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+
+.overlay__spinner {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 4px solid rgba(255, 255, 255, 0.12);
+  border-top-color: var(--accent);
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+.overlay__text {
+  font-size: 17px;
+  letter-spacing: 0.16em;
+  color: var(--ink);
+  margin-right: -0.16em;
+}
+
+.overlay__hint {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  margin-top: -8px;
+}
+
+/* Short viewports (landscape phones): compact the form so nothing scrolls. */
+@media (max-height: 540px) {
+  .card {
+    gap: 10px;
+    padding: 14px 16px 16px;
+    border-radius: 22px;
+  }
+
+  .brand {
+    font-size: 11px;
+  }
+
+  .brand__sub {
+    font-size: 22px;
+    margin-top: -4px;
+  }
+
+  .room-badge {
+    padding: 8px 12px;
+    border-radius: 14px;
+  }
+
+  .room-badge__code {
+    font-size: 34px;
+  }
+
+  .input {
+    font-size: 17px;
+    padding: 11px 14px;
+    border-radius: 13px;
+  }
+
+  .input--code {
+    font-size: 26px;
+  }
+
+  .big-btn {
+    min-height: 56px;
+    font-size: 19px;
+    border-radius: 16px;
+  }
+
+  .big-btn--hero {
+    min-height: 64px;
+    font-size: 22px;
+    border-radius: 18px;
+  }
+
+  .title {
+    font-size: 22px;
+  }
+
+  .score__value {
+    font-size: clamp(48px, 14vh, 84px);
+  }
+
+  .screen--lobby {
+    gap: 8px;
+  }
+
+  .chef-chip {
+    padding: 5px 14px 5px 7px;
+  }
+
+  .chef-chip__dot {
+    width: 18px;
+    height: 18px;
+  }
+}
+
+/* Very short viewports (small phones in landscape): drop the eyebrow and
+   tighten everything so the form never needs a scroll. */
+@media (max-height: 400px) {
+  /* "OVERCOOKED" alone still reads as the game; "PARTY" alone does not. */
+  .brand {
+    font-size: 12px;
+  }
+
+  .brand__sub {
+    display: none;
+  }
+
+  .card {
+    gap: 8px;
+    padding: 12px 14px 14px;
+  }
+
+  .room-badge {
+    padding: 6px 10px;
+  }
+
+  .room-badge__code {
+    font-size: 28px;
+  }
+
+  .input {
+    font-size: 16px;
+    padding: 9px 12px;
+  }
+
+  .input--code {
+    font-size: 22px;
+  }
+
+  .big-btn {
+    min-height: 52px;
+    font-size: 17px;
+  }
+
+  .big-btn--hero {
+    min-height: 58px;
+    font-size: 19px;
+  }
+
+  .title {
+    font-size: 19px;
+  }
+
+  .stats {
+    gap: 8px;
+  }
+
+  .stat {
+    min-width: 88px;
+    padding: 8px 14px;
+  }
+
+  .stat__value {
+    font-size: 22px;
+  }
+
+  .screen--over {
+    gap: 10px;
+  }
+}
+
+/* Portrait: the phone is held low, so drop both control clusters into thumb
+   reach instead of leaving them stranded mid-screen. */
+@media (orientation: portrait) {
+  .stick-zone,
+  .btn-zone {
+    justify-content: flex-end;
+    padding-bottom: clamp(28px, 13vh, 130px);
+  }
+
+  .stick-hint {
+    margin-bottom: calc(var(--btn) * 0.35);
+  }
+}
+
+/* Landscape: tighten the vertical chrome so the pad keeps its room. */
+@media (orientation: landscape) and (max-height: 460px) {
+  .pad-hud {
+    top: 0;
+    padding: 3px 12px 3px 6px;
+  }
+
+  .stick-hint__ring {
+    width: 108px;
+    height: 108px;
+  }
+}
