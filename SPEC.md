@@ -5,35 +5,55 @@ AirPlayed / screen-shared to a TV. **Phones** scan a QR code on that screen,
 join over the LAN, and become gamepads (joystick + two buttons). The Node
 server is the single authority for all game state.
 
-## Architecture
+## Architecture (Next.js + Vercel WebSockets)
 
 ```
-phones (join.html, src/controller/)      host laptop (index.html, src/host/)
-        │  ws: input/press/release              │  ws: state snapshots ~20 Hz
-        └───────────────► Node server ◄─────────┘
-                    (express + ws, port 3117)
-                 authoritative sim @ 30 Hz, rooms
+phones (/join, components/controller/)   host laptop → TV (/, components/host/)
+        │ ws: input/press/release               │ ws: state snapshots ~20 Hz
+        └────────────► /api/ws  ◄───────────────┘
+        Next.js on Vercel Fluid Compute (experimental_upgradeWebSocket)
+        or the local custom server (server/local.ts) for LAN parties
+   realtime/: rooms + authoritative sim @30 Hz + bus (memory | Redis)
 ```
 
-- **Dev**: `npm run dev` → tsx server on :3117 + vite on :5173 (LAN-exposed,
-  proxies `/ws` → :3117). Open `http://<lan-ip>:5173` on the laptop.
-- **Prod**: `npm run build && npm start` → express serves `dist/` and `/ws`
-  on :3117.
-- The host page sends `hello-host` with its own `location.port`; the server
-  answers with a `joinUrl` built from its LAN IP + that port
-  (`http://<lan-ip>:<port>/join.html?room=CODE`). The host renders that URL
-  as a QR code.
-- Rooms: 4-letter codes (unambiguous alphabet, e.g. no O/0/I/1). A room dies
-  when its host socket closes. Multiple rooms may coexist.
+- **Local/LAN**: `npm run dev` (or `build` + `start`) → `server/local.ts`,
+  a custom Next server on :3000 that handles the `/api/ws` upgrade itself
+  with `ws`. Single process, in-memory bus, zero external deps. Open
+  `http://<lan-ip>:3000` on the laptop.
+- **Vercel**: standard `next build`; `app/api/ws/route.ts` upgrades via
+  `experimental_upgradeWebSocket` (`@vercel/functions`). Both entry points
+  feed the same transport-agnostic room manager in `realtime/`.
+- **Vercel realities the design must absorb**:
+  - Function invocations cap at `maxDuration` (300 s) — every socket dies
+    eventually. Clients auto-reconnect; the host sends
+    `hello-host {resume:{room}}` to restore its room, controllers re-join
+    with their seat `token`.
+  - No instance affinity across connections. Room registry + roster +
+    latest sim snapshot persist to Redis when `REDIS_URL` (or `KV_URL`)
+    is set; the sim runs inside the host's connection, snapshots are
+    checkpointed ~1/s, and a resumed host reconstructs the Game from the
+    checkpoint (sim exposes restore-from-Snapshot). Controllers that land
+    on a different instance than their room's host relay input/output over
+    Redis pub/sub. Without Redis (local play), an in-memory bus/registry
+    does the same job in one process.
+- The join URL is built **client-side** on the host page:
+  `${location.origin}/join?room=CODE` → rendered as the QR.
+- Rooms: 4-letter codes (unambiguous alphabet, e.g. no O/0/I/1). A room
+  with no live host survives a grace period (~2 min) for host reconnects,
+  then dies. Multiple rooms may coexist.
 
 ## File ownership (for parallel agents — do not edit outside your set)
 
-- **game-server agent**: `server/index.ts`, `server/game.ts` (+ any extra
-  `server/*.ts`), `shared/levels.ts`
-- **host-ui agent**: `index.html`, `src/host/**`
-- **controller-ui agent**: `join.html`, `src/controller/**`
+- **realtime agent**: `realtime/**`, `app/api/ws/route.ts`,
+  `server/local.ts`, `game/game.ts`, `shared/levels.ts`, `scripts/smoke.ts`
+- **host-ui agent**: `app/page.tsx`, `components/host/**`
+- **controller-ui agent**: `app/join/page.tsx`, `components/controller/**`
 - Frozen contract (read-only for everyone): `shared/types.ts`,
-  `shared/protocol.ts`, `package.json`, `vite.config.ts`, `tsconfig.json`
+  `shared/protocol.ts`, `package.json`, `tsconfig.json`, `next.config.ts`,
+  `app/layout.tsx`, `app/globals.css`
+- Legacy Vite implementation kept temporarily as reference (port from it,
+  never import it): `src/**`, `index.html`, `join.html`,
+  `server/index.vite-reference.ts`
 
 ## Game rules (authoritative numbers live in `shared/types.ts`)
 
