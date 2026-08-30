@@ -7,8 +7,9 @@ becomes the gamepad (joystick + GRAB + CHOP/DASH).
 
 ## Play
 
-**On Vercel** (works anywhere, phones just need internet): deploy, open the
-deployment URL on the laptop, put it on the TV. Done.
+**On Vercel** (works anywhere, phones just need internet): open
+**https://overcooked-bay.vercel.app** on the laptop, put it on the TV. Done.
+Pushes to `main` auto-deploy.
 
 **On your LAN** (offline, lowest latency):
 
