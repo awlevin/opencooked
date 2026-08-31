@@ -5,9 +5,9 @@
 // every listener this module installs can be taken back off again, so React
 // StrictMode's mount/unmount/mount cycle leaves nothing behind.
 
-const NAME_KEY = 'ocp.name';
-const ROOM_KEY = 'ocp.room';
-const TOKEN_PREFIX = 'ocp.token.';
+const NAME_KEY = 'opencooked.name';
+const ROOM_KEY = 'opencooked.room';
+const TOKEN_PREFIX = 'opencooked.token.';
 
 /* ------------------------------- storage -------------------------------- */
 

@@ -1,5 +1,12 @@
-// WebSocket wire protocol. All messages are JSON, single ws endpoint at /ws.
+// WebSocket wire protocol. All messages are JSON, single endpoint at WS_PATH.
 // This file is the contract between server, host renderer, and controller.
+//
+// Two ways a controller can reach the sim:
+//   cloud  — phone ⇄ server ⇄ host. Always available, ~30-80 ms.
+//   local  — phone ⇄ host directly over an RTCDataChannel on the same
+//            Wi-Fi, ~2-5 ms. The server only brokers the handshake.
+// A phone always starts on the cloud path and silently upgrades if the
+// peer connection succeeds. See .private/plans/local-mode-webrtc.md.
 
 import type { LobbyPlayer, Phase, Snapshot, Vec2 } from './types';
 
@@ -24,7 +31,19 @@ export type C2S =
   // Any controller may start the round from the lobby, or restart from
   // the gameover screen.
   | { t: 'start' }
-  | { t: 'again' };
+  | { t: 'again' }
+  // --- local mode ---
+  // WebRTC handshake, relayed verbatim by the server, which never parses
+  // `data` (SDP offer/answer or an ICE candidate). `to` is a playerId when
+  // the host sends, or the literal 'host' when a controller sends.
+  | { t: 'signal'; to: string; data: unknown }
+  // Host announces it will run the sim in-tab. The server stops ticking
+  // this room and becomes registry + relay only. Answered with 'sim'.
+  | { t: 'claim-sim' }
+  // Tunnel between a host-owned room and the server, carrying traffic for
+  // controllers that could NOT establish a peer connection. `env` is an
+  // internal bus envelope, opaque to this contract and owned by realtime/.
+  | { t: 'bus'; env: unknown };
 
 // --- server -> client ---
 export type S2C =
@@ -44,7 +63,16 @@ export type S2C =
   | { t: 'buzz'; ms: number }
   // To everyone when the round ends.
   | { t: 'gameover'; score: number; served: number; missed: number }
-  | { t: 'err'; msg: string };
+  | { t: 'err'; msg: string }
+  // --- local mode ---
+  // The other half of the handshake above. `from` is a playerId, or 'host'
+  // when the host is the sender.
+  | { t: 'signal'; from: string; data: unknown }
+  // Who is authoritative for this room. Sent to the host after 'claim-sim'
+  // and whenever ownership moves (e.g. the host tab went away and the
+  // server resumed the round from its checkpoint).
+  | { t: 'sim'; owner: 'host' | 'server' }
+  | { t: 'bus'; env: unknown };
 
 export const WS_PATH = '/api/ws';
 export const LOCAL_PORT = 3000;

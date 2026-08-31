@@ -1,5 +1,5 @@
 /* ---------------------------------------------------------------
-   Overcooked Party — host / TV view.
+   Opencooked — host / TV view.
    Warm cartoon kitchen: cream card stock, thick cocoa outlines,
    butter-yellow accents. Nothing here should look like browser UI.
 
@@ -298,6 +298,38 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* Local mode: this chef's phone talks straight to this screen. A bolt, no
+   words — it is a fact about the connection, not a setting to think about. */
+.host-root .chef .bolt {
+  width: 0;
+  margin-left: 0;
+  overflow: hidden;
+  font-size: 0.78em;
+  line-height: 1;
+  color: var(--mint);
+  text-shadow: 0 0.06em 0 rgba(29, 16, 9, 0.55);
+  opacity: 0;
+  transform: scale(0.4);
+  transition:
+    width 0.24s cubic-bezier(0.2, 1.5, 0.4, 1),
+    margin-left 0.24s ease,
+    opacity 0.2s ease,
+    transform 0.28s cubic-bezier(0.2, 1.5, 0.4, 1);
+}
+.host-root .chef.is-local .bolt {
+  width: 1em;
+  margin-left: -0.15em;
+  opacity: 1;
+  transform: scale(1);
+}
+.host-root .chef.is-local {
+  border-color: var(--mint);
+}
+@media (prefers-reduced-motion: reduce) {
+  .host-root .chef .bolt {
+    transition: none;
+  }
 }
 .host-root .roster .waiting {
   font-size: clamp(16px, 1.7vw, 46px);

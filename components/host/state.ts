@@ -22,6 +22,8 @@ export interface RenderPlayer {
   dashing: boolean;
   /** 0..1, how far into the dash we are (for squash/stretch). */
   dashT: number;
+  /** This chef's phone is wired straight into this tab (local mode). */
+  local: boolean;
 }
 
 export interface Frame {
@@ -52,6 +54,13 @@ export class SnapshotBuffer {
   /** Persistent per-player facing so rotation eases instead of snapping. */
   private angles = new Map<string, number>();
   private lastSampleAt = 0;
+  /** Asked per frame, so the badge is never a stale copy of the truth. */
+  private localCheck: (playerId: string) => boolean = () => false;
+
+  /** Tell the renderer which chefs are on a direct peer connection. */
+  setLocalCheck(fn: (playerId: string) => boolean): void {
+    this.localCheck = fn;
+  }
 
   push(s: Snapshot): void {
     const t = performance.now();
@@ -128,6 +137,7 @@ export class SnapshotBuffer {
         chopping: p.chopping,
         dashing: p.dashMsLeft > 0,
         dashT: p.dashMsLeft > 0 ? Math.min(1, p.dashMsLeft / 150) : 0,
+        local: this.localCheck(p.id),
       };
     });
 

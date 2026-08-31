@@ -12,6 +12,13 @@ export interface Link {
   /** The connection id, same on both instances. */
   readonly id: string;
   readonly local: boolean;
+  /**
+   * True when this link is a direct peer connection (an RTCDataChannel from a
+   * phone on the same Wi-Fi). Two things depend on it: the "local" badge on
+   * the host screen, and the reclaim rule — a phone upgrading to its peer
+   * link keeps its cloud socket, because that socket is its way back.
+   */
+  readonly peer: boolean;
   send(msg: S2C): void;
   /** Optionally deliver one last message, then hang up. */
   close(msg?: S2C): void;
@@ -20,7 +27,10 @@ export interface Link {
 export class LocalLink implements Link {
   readonly local = true;
 
-  constructor(readonly conn: Conn) {}
+  constructor(
+    readonly conn: Conn,
+    readonly peer = false,
+  ) {}
 
   get id(): string {
     return this.conn.id;
@@ -38,6 +48,7 @@ export class LocalLink implements Link {
 
 export class RemoteLink implements Link {
   readonly local = false;
+  readonly peer = false;
 
   /** Starts as the connection id, becomes the playerId once the proxy acks. */
   private addr: string;

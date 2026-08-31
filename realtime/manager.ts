@@ -4,7 +4,6 @@
 // to it with no bus in between (this is the whole story for a LAN party).
 // Slow path: the room is owned elsewhere, so the socket becomes a proxy.
 
-import { getBackend } from './backend';
 import type { Conn } from './conn';
 import { INSTANCE_ID } from './ids';
 import type { Link } from './link';
@@ -12,8 +11,9 @@ import { LocalLink } from './link';
 import { RemoteAttachment } from './remote';
 import type { MigratingSeat, RoomCtx } from './room';
 import { Room } from './room';
-import type { Backend } from './store';
+import type { Backend, RoomRecord } from './store';
 import { asRecord, asToken, normalizeCode, parseFrame } from './validate';
+import type { Snapshot } from '../shared/types';
 
 type ConnState =
   | { role: 'none' }
@@ -23,21 +23,32 @@ type ConnState =
 
 interface Holder {
   conn: Conn;
+  /** True for an RTCDataChannel straight from a phone on the same Wi-Fi. */
+  peer: boolean;
   state: ConnState;
   /** Frames are handled one at a time so `join` always lands before `input`. */
   queue: Promise<void>;
 }
 
 export class RoomManager {
-  /** Overridable so a test can put two "instances" in one process. */
-  constructor(readonly instanceId: string = INSTANCE_ID) {}
+  /**
+   * `instanceId` is overridable so a test can put two "instances" in one
+   * process. `openBackend` is injected rather than imported so this module
+   * stays free of `realtime/backend.ts` — which reaches for Redis, and would
+   * drag ioredis into the browser bundle. The host tab passes its own
+   * in-memory backend; the servers pass `getBackend`.
+   */
+  constructor(
+    private readonly openBackend: () => Promise<Backend>,
+    readonly instanceId: string = INSTANCE_ID,
+  ) {}
 
   private readonly rooms = new Map<string, Room>();
   private readonly holders = new Map<string, Holder>();
   private backend: Backend | null = null;
 
   private async ctx(): Promise<RoomCtx> {
-    const backend = (this.backend ??= await getBackend());
+    const backend = (this.backend ??= await this.openBackend());
     return {
       store: backend.store,
       bus: backend.bus,
@@ -54,10 +65,33 @@ export class RoomManager {
     return this.rooms.size;
   }
 
+  /** The room this instance is running, if it is running that one. */
+  room(code: string): Room | null {
+    return this.rooms.get(code) ?? null;
+  }
+
+  /**
+   * Stand a room up on this instance under a code someone else minted, from a
+   * record we were handed. This is how a host tab adopts the room the server
+   * created for it — same `Room.adopt` a second server instance would use.
+   */
+  async adoptRoom(rec: RoomRecord, snap: Snapshot | null): Promise<Room | null> {
+    const existing = this.rooms.get(rec.code);
+    if (existing) return existing;
+    const ctx = await this.ctx();
+    await ctx.store.createRoom(rec);
+    await ctx.store.putRoom(rec);
+    if (snap) await ctx.store.putSnapshot(rec.code, snap);
+    const room = await Room.adopt(ctx, rec);
+    if (room) this.rooms.set(rec.code, room);
+    return room;
+  }
+
   // --- socket lifecycle ----------------------------------------------------
 
-  attach(conn: Conn): void {
-    const holder: Holder = { conn, state: { role: 'none' }, queue: Promise.resolve() };
+  /** `peer` marks a direct WebRTC transport: see `Link.peer`. */
+  attach(conn: Conn, peer = false): void {
+    const holder: Holder = { conn, peer, state: { role: 'none' }, queue: Promise.resolve() };
     this.holders.set(conn.id, holder);
 
     conn.onMessage((raw) => {
@@ -167,9 +201,13 @@ export class RoomManager {
       return;
     }
 
+    // A relaying room's sim lives in a host tab, so even a socket that landed
+    // on the owning instance has to go the long way round — over the bus and
+    // down the tunnel. That is the same path a phone on another instance
+    // takes, so there is exactly one relayed code path, not two.
     const local = this.rooms.get(code);
-    if (local) {
-      const link = new LocalLink(holder.conn);
+    if (local && !local.isRelaying) {
+      const link = new LocalLink(holder.conn, holder.peer);
       holder.state = { role: 'seat', code, link };
       local.handleMessage(link, msg);
       return;
@@ -210,11 +248,16 @@ export class RoomManager {
     this.rooms.clear();
     this.holders.clear();
   }
+
+  /**
+   * Let go of every room without ending it. A host tab unmounting does this:
+   * the rooms are the server's, and the server resumes them from the last
+   * checkpoint rather than telling everybody the kitchen burned down.
+   */
+  release(): void {
+    for (const room of [...this.rooms.values()]) room.standDown();
+    this.rooms.clear();
+    this.holders.clear();
+  }
 }
 
-let singleton: RoomManager | null = null;
-
-/** One manager per process; both entry points share it. */
-export function getManager(): RoomManager {
-  return (singleton ??= new RoomManager());
-}

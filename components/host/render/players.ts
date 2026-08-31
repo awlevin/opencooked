@@ -213,14 +213,36 @@ export function drawPlayerLabel(
   c.save();
   c.font = font(size, 800);
   const name = p.name.length > 10 ? `${p.name.slice(0, 9)}…` : p.name;
-  const w = c.measureText(name).width + size * 0.9;
+  // A chef on a direct peer connection carries a small bolt inside the pill.
+  const boltW = p.local ? size * 0.72 : 0;
+  const w = c.measureText(name).width + size * 0.9 + boltW;
   const h = size * 1.36;
   rr(c, x - w / 2, y - h / 2, w, h, h / 2);
   fillStroke(c, 'rgba(30, 17, 9, 0.86)', p.color, Math.max(2, size * 0.13));
   c.restore();
-  text(c, name, x, y + size * 0.04, {
+  text(c, name, x + boltW / 2, y + size * 0.04, {
     size,
     fill: PAL.cream,
     weight: 800,
   });
+  if (p.local) drawBolt(c, x - w / 2 + size * 0.52, y, size * 0.5);
+}
+
+/**
+ * The "local" mark: a lightning bolt, because that is what it means — this
+ * chef's phone is talking straight to this screen. Small, mint, no words.
+ */
+function drawBolt(c: CanvasRenderingContext2D, x: number, y: number, s: number): void {
+  c.save();
+  c.translate(x, y);
+  c.beginPath();
+  c.moveTo(s * 0.28, -s);
+  c.lineTo(-s * 0.42, s * 0.14);
+  c.lineTo(s * 0.02, s * 0.14);
+  c.lineTo(-s * 0.26, s);
+  c.lineTo(s * 0.46, -s * 0.2);
+  c.lineTo(s * 0.02, -s * 0.2);
+  c.closePath();
+  fillStroke(c, PAL.mint, PAL.ink, Math.max(1, s * 0.24));
+  c.restore();
 }

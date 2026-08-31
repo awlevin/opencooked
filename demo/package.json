@@ -1,9 +1,9 @@
 {
-  "name": "overcooked-party-demo",
+  "name": "opencooked-demo",
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Launch demo video for Overcooked Party: Playwright capture of a real round + a Remotion edit.",
+  "description": "Launch demo video for Opencooked: Playwright capture of a real round + a Remotion edit.",
   "scripts": {
     "capture": "tsx capture/capture.ts",
     "render": "remotion render src/index.ts Demo out/demo.mp4",

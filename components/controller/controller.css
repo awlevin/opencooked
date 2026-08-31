@@ -1,4 +1,4 @@
-/* Overcooked Party — phone controller.
+/* Opencooked — phone controller.
    Dark plastic gamepad. The player colour arrives from the server and lands on
    --accent (see theme.ts), so every screen tints to match the chef on the TV.
 
@@ -828,7 +828,7 @@ body {
 /* Very short viewports (small phones in landscape): drop the eyebrow and
    tighten everything so the form never needs a scroll. */
 @media (max-height: 400px) {
-  /* "OVERCOOKED" alone still reads as the game; "PARTY" alone does not. */
+  /* "OPENCOOKED" alone still reads as the game; "PARTY" alone does not. */
   .brand {
     font-size: 12px;
   }

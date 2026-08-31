@@ -1,4 +1,4 @@
-// Films a real round of Overcooked Party.
+// Films a real round of Opencooked.
 //
 // Boots the game on a scratch port, opens the host TV screen at exactly
 // 1920x1080 and a phone controller at 390x844, sits three cooking bots

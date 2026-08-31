@@ -74,7 +74,12 @@ export class LobbyScreen {
       });
   }
 
-  setPlayers(players: LobbyPlayer[]): void {
+  /**
+   * `isLocal` marks the chefs whose phones are wired straight into this tab.
+   * No toggle and no explanation: a small bolt on the chip, so the speed is
+   * visible without ever being a decision the player has to make.
+   */
+  setPlayers(players: LobbyPlayer[], isLocal: (id: string) => boolean = () => false): void {
     const seen = new Set<string>();
     for (const p of players) {
       seen.add(p.id);
@@ -86,11 +91,16 @@ export class LobbyScreen {
         dot.className = 'dot';
         const name = document.createElement('span');
         name.className = 'nm';
-        chip.append(dot, name);
+        const bolt = document.createElement('span');
+        bolt.className = 'bolt';
+        bolt.textContent = '⚡';
+        bolt.title = 'Playing over the local network';
+        chip.append(dot, name, bolt);
         this.chips.set(p.id, chip);
         this.rosterEl.append(chip);
       }
       chip.style.setProperty('--c', p.color);
+      chip.classList.toggle('is-local', isLocal(p.id));
       const nameEl = chip.querySelector('.nm');
       if (nameEl && nameEl.textContent !== p.name) nameEl.textContent = p.name;
     }

@@ -18,8 +18,7 @@ import { WebSocketServer } from 'ws';
 
 import { LOCAL_PORT, WS_PATH } from '../shared/protocol';
 import { MAX_PAYLOAD_BYTES, PING_MS } from '../realtime/config';
-import { attachWebSocket } from '../realtime';
-import { getManager } from '../realtime/manager';
+import { attachWebSocket, getManager } from '../realtime';
 
 const dev = process.env.NODE_ENV !== 'production';
 /** LOCAL_PORT is the contract; PORT only exists so tests can take a spare. */
@@ -107,7 +106,7 @@ wss.on('connection', (ws) => {
 
 server.listen(port, () => {
   const url = `http://${lanIp()}:${port}`;
-  console.log(`Overcooked Party on :${port} (${dev ? 'dev' : 'production'})`);
+  console.log(`Opencooked on :${port} (${dev ? 'dev' : 'production'})`);
   console.log(`  host screen  ${url}`);
   console.log(`  phones       ${url}/join`);
 });

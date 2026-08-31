@@ -1,15 +1,27 @@
-// Public surface of the realtime layer. Entry points (server/local.ts and
-// app/api/ws/route.ts) should need nothing else.
+// Public surface of the realtime layer for the SERVER entry points
+// (server/local.ts and app/api/ws/route.ts). They should need nothing else.
+//
+// The host tab does not come through here: importing this module pulls in
+// `backend.ts`, and with it ioredis. The tab builds its own manager over an
+// in-memory backend — see `realtime/host.ts`.
 
 import type { WebSocket } from 'ws';
 
+import { getBackend } from './backend';
 import type { Conn } from './conn';
 import { connFromWs } from './conn';
-import { getManager } from './manager';
+import { RoomManager } from './manager';
 
 export type { Conn } from './conn';
 export { connFromWs } from './conn';
-export { getManager, RoomManager } from './manager';
+export { RoomManager } from './manager';
+
+let singleton: RoomManager | null = null;
+
+/** One manager per process; both server entry points share it. */
+export function getManager(): RoomManager {
+  return (singleton ??= new RoomManager(getBackend));
+}
 
 /** Hand a transport-agnostic connection to the room manager. */
 export function attachConnection(conn: Conn): void {

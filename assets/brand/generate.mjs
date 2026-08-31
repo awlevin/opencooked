@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /* ---------------------------------------------------------------
-   Overcooked Party — brand asset generator.
+   Opencooked — brand asset generator.
 
    Each asset is an HTML page in this folder, laid out at its exact
    export size. This script serves the folder over http (ES modules
@@ -118,6 +118,53 @@ async function main() {
       });
       if (spills.length > 0) {
         throw new Error(`${a.page}: content outside the frame:\n    ${spills.join('\n    ')}`);
+      }
+
+      // The wordmark is a lockup: it must render on exactly one line. A
+      // second line still fits the frame, so the spill guard above would
+      // wave it through — this is what actually catches a too-wide rename.
+      const wrapped = await page.evaluate(() => {
+        const h1 = document.querySelector('.title h1');
+        if (!h1) return null;
+        const range = document.createRange();
+        range.selectNodeContents(h1);
+        const rows = new Set(
+          [...range.getClientRects()].map((r) => Math.round(r.top)),
+        );
+        return rows.size > 1 ? rows.size : null;
+      });
+      if (wrapped) {
+        throw new Error(
+          `${a.page}: the wordmark wrapped onto ${wrapped} lines — it must be one`,
+        );
+      }
+
+      // Type must keep clear of the cards and of the drawn kitchen. The
+      // wordmark sits left, the art right; a wider wordmark closes that gap
+      // long before anything leaves the frame.
+      const CLEARANCE = 24;
+      const collisions = await page.evaluate((pad) => {
+        const out = [];
+        const type = [...document.querySelectorAll('.lockup > *')];
+        for (const el of document.querySelectorAll('.card')) {
+          const c = el.getBoundingClientRect();
+          for (const t of type) {
+            const r = t.getBoundingClientRect();
+            const gapX = Math.max(c.left - r.right, r.left - c.right);
+            const gapY = Math.max(c.top - r.bottom, r.top - c.bottom);
+            if (Math.max(gapX, gapY) < pad) {
+              out.push(
+                `${t.className || t.tagName} vs ${el.className}: ${Math.round(Math.max(gapX, gapY))}px`,
+              );
+            }
+          }
+        }
+        return out;
+      }, CLEARANCE);
+      if (collisions.length > 0) {
+        throw new Error(
+          `${a.page}: type is within ${CLEARANCE}px of a card:\n    ${collisions.join('\n    ')}`,
+        );
       }
 
       const dest = join(REPO, a.out);

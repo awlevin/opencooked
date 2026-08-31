@@ -1,9 +1,9 @@
-# Overcooked Party — Spec
+# Opencooked — Spec
 
-A couch-party remake of Overcooked. One **host** page runs on a laptop and is
-AirPlayed / screen-shared to a TV. **Phones** scan a QR code on that screen,
-join over the LAN, and become gamepads (joystick + two buttons). The Node
-server is the single authority for all game state.
+An original couch-party co-op cooking game. One **host** page runs on a
+laptop and is AirPlayed / screen-shared to a TV. **Phones** scan a QR code on
+that screen, join over the LAN, and become gamepads (joystick + two buttons).
+The Node server is the single authority for all game state.
 
 ## Architecture (Next.js + Vercel WebSockets)
 

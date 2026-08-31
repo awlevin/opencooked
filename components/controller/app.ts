@@ -250,12 +250,14 @@ export class ControllerApp {
     if (this.destroyed) return;
     this.status = status;
     if (status === 'reconnecting') {
-      if (this.joined) {
-        this.showOverlay('Reconnecting…');
-      } else {
+      if (!this.joined) {
         this.notice = 'Cannot reach the kitchen. Retrying…';
         this.render();
+      } else if (this.net.transport === 'cloud') {
+        this.showOverlay('Reconnecting…');
       }
+      // A dead socket while the game is running over a direct channel is not
+      // something the player is experiencing, so we do not say it is.
     } else if (status === 'open' && !this.joined) {
       this.notice = 'Joining…';
       this.render();

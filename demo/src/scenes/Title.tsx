@@ -59,7 +59,7 @@ export const Title: React.FC = () => {
             opacity: interpolate(pop, [0, 0.3], [0, 1], { extrapolateRight: 'clamp' }),
           }}
         >
-          OVER<span style={{ color: PAL.butter }}>COOKED</span>
+          OPEN<span style={{ color: PAL.butter }}>COOKED</span>
         </h1>
 
         <div

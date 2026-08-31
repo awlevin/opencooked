@@ -47,7 +47,7 @@ export const Outro: React.FC = () => {
         }}
       >
         <h1 style={{ margin: 0, fontSize: 116, fontWeight: 800, ...outlined(0.075) }}>
-          OVER<span style={{ color: PAL.butter }}>COOKED</span> PARTY
+          OPEN<span style={{ color: PAL.butter }}>COOKED</span>
         </h1>
       </div>
 
@@ -65,7 +65,7 @@ export const Outro: React.FC = () => {
             letterSpacing: '0.01em',
           }}
         >
-          overcooked-bay.vercel.app
+          opencooked.vercel.app
         </div>
       </Line>
 
@@ -79,7 +79,7 @@ export const Outro: React.FC = () => {
             letterSpacing: '0.02em',
           }}
         >
-          github.com/awlevin/overcooked
+          github.com/awlevin/opencooked
         </div>
       </Line>
 
@@ -95,7 +95,7 @@ export const Outro: React.FC = () => {
             opacity: 0.72,
           }}
         >
-          MIT licensed fan remake
+          MIT licensed &middot; open source
         </div>
       </Line>
     </div>

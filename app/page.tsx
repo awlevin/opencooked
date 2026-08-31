@@ -43,7 +43,7 @@ export default function HostPage() {
           <header className="title">
             <div className="kicker">Get your aprons on</div>
             <h1>
-              OVER<span className="hot">COOKED</span>
+              OPEN<span className="hot">COOKED</span>
             </h1>
             <div className="sub">PARTY</div>
           </header>

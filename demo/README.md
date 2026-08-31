@@ -1,4 +1,4 @@
-# Overcooked Party — launch demo
+# Opencooked — launch demo
 
 The video is not a mock-up. `capture/` boots the real game on a scratch port,
 sits three bots and one phone at the table, plays a round, and films it.

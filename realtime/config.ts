@@ -30,6 +30,15 @@ export const SEAT_GRACE_LOBBY_MS = 10_000;
 /** Housekeeping cadence (grace timers, lease renew, ownership watch). */
 export const SWEEP_MS = 1_000;
 
+/**
+ * Local mode: after a host socket (re)attaches to a room whose sim was handed
+ * to a host tab, how long the server waits for that tab to say `claim-sim`
+ * again before taking the round back over from its checkpoint. Long enough to
+ * cover a socket reconnect, short enough that a host page which cannot run the
+ * sim is not left staring at a frozen kitchen.
+ */
+export const RELAY_CLAIM_GRACE_MS = 3_000;
+
 /** A controller relayed over the bus re-announces itself until answered. */
 export const REMOTE_JOIN_RETRY_MS = 1_500;
 export const REMOTE_JOIN_TIMEOUT_MS = 20_000;

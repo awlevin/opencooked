@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/banner.png" alt="Overcooked Party" width="100%">
+  <img src="assets/banner.png" alt="Opencooked" width="100%">
 </p>
 
-<h1 align="center">Overcooked Party 🍲</h1>
+<h1 align="center">Opencooked 🍲</h1>
 
 <p align="center">
   <strong>Your laptop is the console. Every phone in the room is a controller.</strong>
@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-blue.svg"></a>
-  <a href="https://github.com/awlevin/overcooked/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/awlevin/overcooked/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/awlevin/opencooked/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/awlevin/opencooked/actions/workflows/ci.yml/badge.svg"></a>
 </p>
 
 ---
@@ -31,7 +31,7 @@ everyone else scan the QR code. Their phone becomes a gamepad — joystick,
 
 **Hosted** — works anywhere, phones only need internet:
 
-> **https://overcooked-bay.vercel.app**
+> **https://opencooked.vercel.app**
 
 **On your LAN** — offline, lowest latency:
 
@@ -130,7 +130,7 @@ reclaim, and host resume. It never starts a server itself.
 npm run dev                    # in one shell
 npm run smoke                  # in another
 PORT=3123 npm run smoke        # a server on another port
-WS_URL=wss://overcooked-bay.vercel.app/api/ws npm run smoke   # against prod
+WS_URL=wss://opencooked.vercel.app/api/ws npm run smoke   # against prod
 ```
 
 To exercise the multi-instance path — bus relay plus the ownership handover a
@@ -164,8 +164,9 @@ changes, and the rules of the wire contract.
 
 ### Disclaimer
 
-**This is a fan-made homage, built for fun.** It is **not affiliated with,
-endorsed by, or associated with Ghost Town Games or Team17**, the creators and
-publisher of *Overcooked*. No assets from the original game are used here —
-every sprite, tile, and chef is original art drawn in code on an HTML canvas.
+**Opencooked is an original open-source game**, inspired by the co-op cooking
+genre and built for fun. It is **not affiliated with, endorsed by, or
+associated with Ghost Town Games or Team17**, the creators and publisher of
+*Overcooked*. It contains no assets from any commercial game — every tile,
+chef, and ingredient is original art drawn in code on an HTML canvas.
 *Overcooked* and all related trademarks belong to their respective owners.

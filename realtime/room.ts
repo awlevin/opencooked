@@ -8,6 +8,7 @@ import type { S2C } from '../shared/protocol';
 import { MAX_PLAYERS, PLAYER_COLORS, SNAPSHOT_MS, TICK_MS } from '../shared/types';
 import type { LobbyPlayer, Phase, Snapshot } from '../shared/types';
 
+import { asBusEnv, asRoomRecord, hostMayPublish } from './bridge';
 import {
   CHECKPOINT_MS,
   HOST_GRACE_MS,
@@ -15,6 +16,7 @@ import {
   LEASE_RENEW_MS,
   MAX_DT_MS,
   REGISTRY_REFRESH_MS,
+  RELAY_CLAIM_GRACE_MS,
   SEAT_GRACE_LOBBY_MS,
   SEAT_GRACE_PLAYING_MS,
   SWEEP_MS,
@@ -47,7 +49,25 @@ export interface RoomCtx {
 
 interface SeatRuntime {
   seat: Seat;
+  /**
+   * Every transport currently identified as this chef. Normally one. In local
+   * mode a phone holds two at once — its RTCDataChannel and the cloud socket
+   * it keeps as a way back — and both must count as "this chef speaking", or
+   * a reconnecting socket would look like a second player.
+   */
+  links: Map<string, Link>;
+  /** The one we answer on. A peer channel always outranks a cloud socket. */
   link: Link | null;
+}
+
+/** Peer first, otherwise the transport that identified itself most recently. */
+function pickPrimary(links: Map<string, Link>): Link | null {
+  let newest: Link | null = null;
+  for (const link of links.values()) {
+    if (link.peer) return link;
+    newest = link;
+  }
+  return newest;
 }
 
 export class Room {
@@ -71,6 +91,17 @@ export class Room {
 
   private unsubIn: Unsubscribe | null = null;
   private destroyed = false;
+
+  /**
+   * Local mode. When true the sim runs in the host's browser tab and this
+   * object is registry + relay only: it holds the lease, forwards `in` traffic
+   * down the host socket, republishes what comes back, and keeps the last
+   * record and checkpoint the tab sent so it can take the round over if the
+   * tab disappears.
+   */
+  private relaying = false;
+  /** Set while we wait for a reconnected host tab to re-claim the sim. */
+  private claimTimer: ReturnType<typeof setTimeout> | null = null;
 
   private constructor(
     private readonly ctx: RoomCtx,
@@ -129,7 +160,7 @@ export class Room {
     for (const stored of rec.seats) {
       // Every socket of the old instance is gone; the grace clock starts now.
       const seat: Seat = { ...stored, connected: false, disconnectedAt: now };
-      room.seats.set(seat.playerId, { seat, link: null });
+      room.seats.set(seat.playerId, { seat, links: new Map(), link: null });
       if (!game.hasPlayer(seat.playerId)) game.addPlayer(seat.playerId, seat.name, seat.color);
     }
     room.rec.seats = room.storedSeats();
@@ -174,6 +205,21 @@ export class Room {
     return this.host !== null;
   }
 
+  /** True while a host tab owns the sim and we are only relaying for it. */
+  get isRelaying(): boolean {
+    return this.relaying;
+  }
+
+  /** True when this chef's controller is wired straight to us over WebRTC. */
+  isPeerSeat(playerId: string): boolean {
+    return this.seats.get(playerId)?.link?.peer === true;
+  }
+
+  /** Deliver one message to a seat, whatever transport it is on. */
+  sendTo(playerId: string, msg: S2C): void {
+    this.seats.get(playerId)?.link?.send(msg);
+  }
+
   // --- host ----------------------------------------------------------------
 
   attachHost(link: Link, resumed: boolean): void {
@@ -190,10 +236,186 @@ export class Room {
     link.send({ t: 'lobby', players: this.roster() });
     if (this.game.phase !== 'lobby') link.send({ t: 'state', s: this.game.snapshot });
     if (this.game.phase === 'gameover') link.send(this.gameoverMsg());
-    if (this.game.phase === 'playing') this.startLoop();
+
+    if (this.relaying) {
+      // A host tab owned this room before its socket dropped. Its sim has been
+      // running the whole time, so do not start ticking a stale copy — give it
+      // a moment to say `claim-sim` again. If it does not, we take over.
+      link.send({ t: 'sim', owner: 'host' });
+      this.armClaimGrace();
+    } else if (this.game.phase === 'playing') {
+      this.startLoop();
+    }
 
     void this.persist();
     console.log(`[room ${this.code}] host ${resumed ? 'resumed' : 'connected'}`);
+  }
+
+  // --- local mode: the sim moves into the host's tab -----------------------
+
+  /**
+   * The host tab says it will run the sim. We stop ticking and become
+   * registry + relay: the lease, the room code, and a pipe to every controller
+   * that could not reach the tab directly.
+   */
+  private claimSim(link: Link): void {
+    if (this.destroyed || this.host?.id !== link.id) return;
+    this.clearClaimGrace();
+
+    if (this.relaying) {
+      // A reconnected tab re-claiming what it already owns. It has been
+      // simulating the whole time, so seed it from the registry only — its own
+      // copy is fresher and it will ignore ours if it still has one.
+      link.send({ t: 'sim', owner: 'host' });
+      const rec: RoomRecord = { ...this.rec, seats: this.rec.seats.map((s) => ({ ...s })) };
+      void this.ctx.store
+        .getSnapshot(this.code)
+        .then((snap) => {
+          if (this.destroyed || this.host?.id !== link.id) return;
+          link.send({ t: 'bus', env: { k: 'seed', rec, snap } });
+        })
+        .catch(() => link.send({ t: 'bus', env: { k: 'seed', rec, snap: null } }));
+      return;
+    }
+
+    const rec: RoomRecord = { ...this.rec, phase: this.game.phase, seats: this.storedSeats() };
+    const snap = this.game.phase === 'lobby' ? null : this.game.snapshot;
+
+    this.relaying = true;
+    this.stopLoop();
+    // Every seat we were holding locally belongs to the tab now. Hand those
+    // sockets back to the manager: it re-joins them over the bus, and the
+    // seeded tab reclaims each one by its token — same chef, same held item.
+    const moving = this.localSeatConns();
+    this.seats.clear();
+    this.byConn.clear();
+    this.remoteLinks.clear();
+
+    link.send({ t: 'sim', owner: 'host' });
+    link.send({ t: 'bus', env: { k: 'seed', rec, snap } });
+    // The tab's own Room announces itself on the bus as soon as it starts, so
+    // controllers relayed from anywhere rebind without a prompt from here.
+    if (moving.length > 0) this.ctx.onMigrate(moving);
+    console.log(
+      `[room ${this.code}] sim claimed by the host tab — relaying (${rec.seats.length} seat(s))`,
+    );
+  }
+
+  private armClaimGrace(): void {
+    this.clearClaimGrace();
+    this.claimTimer = setTimeout(() => {
+      this.claimTimer = null;
+      void this.stopRelay().catch((err) =>
+        console.error(`[room ${this.code}] could not take the sim back:`, err),
+      );
+    }, RELAY_CLAIM_GRACE_MS);
+    this.claimTimer.unref?.();
+  }
+
+  private clearClaimGrace(): void {
+    if (this.claimTimer === null) return;
+    clearTimeout(this.claimTimer);
+    this.claimTimer = null;
+  }
+
+  /** Take the round back from a host tab that is not coming back. */
+  private async stopRelay(): Promise<void> {
+    if (this.destroyed || !this.relaying) return;
+    this.relaying = false;
+    this.clearClaimGrace();
+
+    const [rec, snap] = await Promise.all([
+      this.ctx.store.getRoom(this.code).catch(() => null),
+      this.ctx.store.getSnapshot(this.code).catch(() => null),
+    ]);
+    if (this.destroyed) return;
+
+    if (snap && snap.phase !== 'lobby') {
+      try {
+        this.game.restoreSnapshot(snap);
+      } catch (err) {
+        console.error(`[room ${this.code}] checkpoint unusable, back to the lobby:`, err);
+        this.game.toLobby();
+      }
+    }
+    if (rec) {
+      this.rec.seq = Math.max(this.rec.seq, rec.seq);
+      const now = Date.now();
+      for (const stored of rec.seats) {
+        // Their phones are still talking to the bus, not to us: the grace
+        // clock starts now and their re-announce reclaims the seat.
+        const seat: Seat = { ...stored, connected: false, disconnectedAt: now };
+        this.seats.set(seat.playerId, { seat, links: new Map(), link: null });
+        if (!this.game.hasPlayer(seat.playerId)) {
+          this.game.addPlayer(seat.playerId, seat.name, seat.color);
+        }
+      }
+    }
+
+    // Wake every proxy: the room's owner changed, so their routing is stale.
+    this.publishAll({ k: 'owner', owner: this.ctx.instanceId });
+
+    this.host?.send({ t: 'sim', owner: 'server' });
+    this.host?.send({ t: 'phase', phase: this.game.phase });
+    this.host?.send({ t: 'lobby', players: this.roster() });
+    if (this.game.phase !== 'lobby') this.host?.send({ t: 'state', s: this.game.snapshot });
+    if (this.game.phase === 'gameover') this.host?.send(this.gameoverMsg());
+    if (this.game.phase === 'playing' && this.host) this.startLoop();
+    await this.persist();
+    console.log(
+      `[room ${this.code}] host tab stood down — server owns the sim again ` +
+        `(${this.game.phase}, ${this.seats.size} seat(s))`,
+    );
+  }
+
+  /** One tunnel envelope from the host tab. Nothing in here is trusted. */
+  private hostBus(link: Link, raw: unknown): void {
+    if (this.destroyed || !this.relaying || this.host?.id !== link.id) return;
+    const env = asBusEnv(raw);
+    if (!env) return;
+    switch (env.k) {
+      case 'pub': {
+        if (!hostMayPublish(this.code, env.ch)) return;
+        void this.ctx.bus
+          .publish(env.ch, env.p)
+          .catch((err) => console.error('[bus] relay publish failed:', err));
+        return;
+      }
+      case 'room': {
+        const rec = asRoomRecord(this.code, env.rec);
+        if (!rec) return;
+        // The tab owns the registry entry while it owns the sim.
+        this.rec.seq = Math.max(this.rec.seq, rec.seq);
+        this.rec.phase = rec.phase;
+        this.rec.seats = rec.seats;
+        this.rec.updatedAt = Date.now();
+        void this.ctx.store
+          .putRoom({ ...this.rec, owner: this.ctx.instanceId, hostConnected: true })
+          .catch((err) => console.error(`[room ${this.code}] registry write failed:`, err));
+        return;
+      }
+      case 'snap': {
+        void this.ctx.store
+          .putSnapshot(this.code, env.snap)
+          .catch((err) => console.error(`[room ${this.code}] checkpoint failed:`, err));
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  /** WebRTC handshake traffic. We route it; we never look inside `data`. */
+  private signal(link: Link, msg: Record<string, unknown>): void {
+    const to = msg.to;
+    if (typeof to !== 'string') return;
+    if (this.host?.id === link.id) {
+      this.sendTo(to, { t: 'signal', from: 'host', data: msg.data });
+      return;
+    }
+    const from = this.byConn.get(link.id);
+    if (!from || to !== 'host') return;
+    this.host?.send({ t: 'signal', from, data: msg.data });
   }
 
   /** Re-take the lease when a host returns to a room we paused. */
@@ -209,8 +431,12 @@ export class Room {
     this.hostGoneAt = Date.now();
     this.rec.hostConnected = false;
     this.stopLoop();
+    // Relay mode stays armed: the tab's sim is still running behind that dead
+    // socket, and the reconnect will re-claim. Checkpointing here would write
+    // our stale copy of the round over the tab's live one.
+    this.clearClaimGrace();
     // Freeze the round where it stands and let another instance pick it up.
-    void this.checkpoint();
+    if (!this.relaying) void this.checkpoint();
     void this.ctx.store.releaseLease(this.code, this.ctx.instanceId).catch(() => undefined);
     this.stopOwning();
     console.log(`[room ${this.code}] host gone — paused, holding for a reconnect`);
@@ -353,6 +579,9 @@ export class Room {
 
   private async persist(): Promise<void> {
     if (this.destroyed) return;
+    // While a host tab owns the sim, its write-through owns the registry
+    // entry. Anything we wrote here would be an empty, frozen copy.
+    if (this.relaying) return;
     this.rec.phase = this.game.phase;
     this.rec.seats = this.storedSeats();
     this.rec.owner = this.ctx.instanceId;
@@ -363,7 +592,7 @@ export class Room {
   }
 
   private async checkpoint(): Promise<void> {
-    if (this.destroyed) return;
+    if (this.destroyed || this.relaying) return;
     await Promise.all([
       this.persist(),
       this.ctx.store
@@ -401,6 +630,9 @@ export class Room {
       }
     }
 
+    // Relay mode: the tab writes the record and sweeps its own seats.
+    if (this.relaying) return;
+
     // A quiet lobby must not let its registry entry time out underneath it.
     this.persistAccumMs += SWEEP_MS;
     if (this.persistAccumMs >= REGISTRY_REFRESH_MS) {
@@ -430,7 +662,10 @@ export class Room {
     const st = this.seats.get(playerId);
     if (!st) return;
     this.seats.delete(playerId);
-    if (st.link) this.byConn.delete(st.link.id);
+    for (const id of st.links.keys()) {
+      this.byConn.delete(id);
+      this.remoteLinks.delete(id);
+    }
     this.game.removePlayer(playerId);
     console.log(`[room ${this.code}] ${st.seat.name} left — ${this.seats.size} chef(s)`);
   }
@@ -441,6 +676,15 @@ export class Room {
     switch (msg.t) {
       case 'join':
         this.join(link, msg);
+        return;
+      case 'claim-sim':
+        this.claimSim(link);
+        return;
+      case 'bus':
+        this.hostBus(link, msg.env);
+        return;
+      case 'signal':
+        this.signal(link, msg);
         return;
       case 'start':
         this.start(link);
@@ -472,40 +716,16 @@ export class Room {
   private join(link: Link, msg: Record<string, unknown>): void {
     // A retried join (the bus is at-most-once) must not buy a second seat.
     const known = this.byConn.get(link.id);
-    if (known) {
-      const st = this.seats.get(known);
-      if (st) {
-        this.sendJoined(st, link);
-        return;
-      }
-      this.byConn.delete(link.id);
+    let st = known ? (this.seats.get(known) ?? null) : null;
+    if (known && !st) this.byConn.delete(link.id);
+
+    if (!st) {
+      const token = asToken(msg.token);
+      st = token ? this.seatByToken(token) : null;
     }
 
-    const token = asToken(msg.token);
-    const reclaimed = token ? this.seatByToken(token) : null;
-    if (reclaimed) {
-      const old = reclaimed.link;
-      if (old && old.id !== link.id) {
-        this.byConn.delete(old.id);
-        this.remoteLinks.delete(old.id);
-        old.close({ t: 'err', msg: 'This chef reconnected somewhere else.' });
-      }
-      reclaimed.link = link;
-      reclaimed.seat.connected = true;
-      reclaimed.seat.disconnectedAt = null;
-      this.byConn.set(link.id, reclaimed.seat.playerId);
-      // Mid-round the body is still on the floor; otherwise re-seat them.
-      if (!this.game.hasPlayer(reclaimed.seat.playerId)) {
-        this.game.addPlayer(
-          reclaimed.seat.playerId,
-          reclaimed.seat.name,
-          reclaimed.seat.color,
-        );
-      }
-      this.sendJoined(reclaimed, link);
-      this.sendLobby();
-      void this.persist();
-      console.log(`[room ${this.code}] ${reclaimed.seat.name} reclaimed their seat`);
+    if (st) {
+      this.adoptLink(st, link);
       return;
     }
 
@@ -523,15 +743,61 @@ export class Room {
       connected: true,
       disconnectedAt: null,
     };
-    const st: SeatRuntime = { seat, link };
-    this.seats.set(playerId, st);
+    const fresh: SeatRuntime = { seat, links: new Map([[link.id, link]]), link };
+    this.seats.set(playerId, fresh);
     this.byConn.set(link.id, playerId);
     this.game.addPlayer(playerId, seat.name, seat.color);
+
+    this.sendJoined(fresh, link);
+    this.sendLobby();
+    void this.persist();
+    console.log(`[room ${this.code}] ${seat.name} (${playerId}) joined — ${this.seats.size} chef(s)`);
+  }
+
+  /**
+   * Point this transport at an existing seat.
+   *
+   * Three things arrive here and all three are the same chef:
+   *   - a phone reconnecting after its socket dropped (hang up the zombie);
+   *   - a phone that just opened its RTCDataChannel and is claiming its seat
+   *     on it (keep the socket — it is the way back if the channel dies);
+   *   - that same phone's socket re-identifying itself later, while the
+   *     channel is healthy (keep the channel primary; do not churn).
+   */
+  private adoptLink(st: SeatRuntime, link: Link): void {
+    const wasPeer = st.link?.peer === true;
+    for (const [id, old] of [...st.links]) {
+      if (id === link.id) continue;
+      // Two live transports for one chef is the normal, wanted state in local
+      // mode. Only hang up a stale cloud socket being replaced by another
+      // cloud socket — that one really is a zombie.
+      if (link.peer || old.peer) continue;
+      st.links.delete(id);
+      this.byConn.delete(id);
+      this.remoteLinks.delete(id);
+      old.close({ t: 'err', msg: 'This chef reconnected somewhere else.' });
+    }
+
+    // Re-insert so `pickPrimary` reads this as the most recent transport.
+    st.links.delete(link.id);
+    st.links.set(link.id, link);
+    st.link = pickPrimary(st.links);
+    st.seat.connected = st.link !== null;
+    st.seat.disconnectedAt = null;
+    this.byConn.set(link.id, st.seat.playerId);
+
+    // Mid-round the body is still on the floor; otherwise re-seat them.
+    if (!this.game.hasPlayer(st.seat.playerId)) {
+      this.game.addPlayer(st.seat.playerId, st.seat.name, st.seat.color);
+    }
 
     this.sendJoined(st, link);
     this.sendLobby();
     void this.persist();
-    console.log(`[room ${this.code}] ${seat.name} (${playerId}) joined — ${this.seats.size} chef(s)`);
+    const how = link.peer ? 'over the local channel' : 'over the cloud';
+    if (link.peer !== wasPeer || st.links.size === 1) {
+      console.log(`[room ${this.code}] ${st.seat.name} claimed their seat ${how}`);
+    }
   }
 
   private sendJoined(st: SeatRuntime, link: Link): void {
@@ -603,8 +869,17 @@ export class Room {
     this.byConn.delete(connId);
     this.remoteLinks.delete(connId);
     const st = this.seats.get(playerId);
-    if (!st || st.link?.id !== connId) return;
-    st.link = null;
+    if (!st) return;
+    const was = st.link;
+    st.links.delete(connId);
+    st.link = pickPrimary(st.links);
+    if (was?.id !== connId) return;
+    // A local channel that dies while the phone still holds its cloud socket
+    // simply demotes to that socket: same chef, same held item, one hop more.
+    if (st.link) {
+      console.log(`[room ${this.code}] ${st.seat.name} fell back to the cloud path`);
+      return;
+    }
     st.seat.connected = false;
     st.seat.disconnectedAt = Date.now();
     // Mid-round the body stays on the floor until the grace period is up, so
@@ -620,6 +895,12 @@ export class Room {
   // --- bus (owner side) ----------------------------------------------------
 
   private onBusIn(payload: unknown): void {
+    if (this.relaying) {
+      // The sim is in the host's tab. Hand the whole envelope over untouched —
+      // its Room subscribes to the same channel on its own in-memory bus.
+      this.host?.send({ t: 'bus', env: { k: 'pub', ch: inChannel(this.code), p: payload } });
+      return;
+    }
     const env = payload as InEnvelope | null;
     if (!env || typeof env !== 'object' || typeof env.connId !== 'string') return;
     switch (env.k) {
@@ -667,27 +948,49 @@ export class Room {
 
   // --- teardown ------------------------------------------------------------
 
+  /** Every seat socket living on this instance, ready to be re-seated. */
+  private localSeatConns(): MigratingSeat[] {
+    const moving: MigratingSeat[] = [];
+    for (const { seat, links } of this.seats.values()) {
+      for (const link of links.values()) {
+        if (link instanceof LocalLink) {
+          moving.push({ conn: link.conn, code: this.code, name: seat.name, token: seat.token });
+        }
+      }
+    }
+    return moving;
+  }
+
   /** Ownership changed under us: hand our controllers to the new owner. */
   private migrate(): void {
     if (this.destroyed) return;
     console.log(`[room ${this.code}] another instance owns this kitchen — handing over`);
-    const moving: MigratingSeat[] = [];
-    for (const { seat, link } of this.seats.values()) {
-      if (link instanceof LocalLink) {
-        moving.push({ conn: link.conn, code: this.code, name: seat.name, token: seat.token });
-      }
-    }
+    const moving = this.localSeatConns();
     this.teardown();
     this.ctx.onDestroyed(this);
     this.ctx.onMigrate(moving);
   }
 
+  /**
+   * Let go of this room without ending it: stop the clocks, drop the lease,
+   * say nothing to anyone. A host tab closing does this — its round lives on
+   * in the server's checkpoint, and the server picks it straight back up.
+   */
+  standDown(): void {
+    if (this.destroyed) return;
+    const host = this.host;
+    this.teardown();
+    host?.close();
+    void this.ctx.store.releaseLease(this.code, this.ctx.instanceId).catch(() => undefined);
+    this.ctx.onDestroyed(this);
+  }
+
   destroy(reason: string): void {
     if (this.destroyed) return;
     const host = this.host;
-    const links = [...this.seats.values()].map((s) => s.link);
+    const links = [...this.seats.values()].flatMap((s) => [...s.links.values()]);
     this.teardown();
-    for (const link of links) link?.close({ t: 'err', msg: reason });
+    for (const link of links) link.close({ t: 'err', msg: reason });
     host?.close({ t: 'err', msg: reason });
     this.publishAll({ k: 'send', msg: { t: 'err', msg: reason } });
     void this.ctx.store.deleteRoom(this.code).catch(() => undefined);
@@ -698,6 +1001,8 @@ export class Room {
 
   private teardown(): void {
     this.destroyed = true;
+    this.relaying = false;
+    this.clearClaimGrace();
     this.stopLoop();
     if (this.house) clearInterval(this.house);
     this.house = null;

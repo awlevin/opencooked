@@ -34,7 +34,7 @@ export function joinScreen(p: JoinProps): HTMLElement {
   const card = el('form', 'card');
   card.setAttribute('novalidate', '');
 
-  card.appendChild(el('div', 'brand', 'OVERCOOKED'));
+  card.appendChild(el('div', 'brand', 'OPENCOOKED'));
   card.appendChild(el('div', 'brand__sub', 'PARTY'));
 
   let codeInput: HTMLInputElement | null = null;

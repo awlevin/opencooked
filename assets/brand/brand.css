@@ -105,6 +105,11 @@ body {
 .title h1 {
   font-weight: 800;
   letter-spacing: 0.01em;
+  /* A lockup never wraps. Without this a slightly wider wordmark breaks
+     onto a second line silently — the box stays inside the frame, so the
+     overflow guard sees nothing. With it, the box grows instead and the
+     guard fires. Pair with a shrink-wrapped .lockup (see og/banner). */
+  white-space: nowrap;
   color: var(--cream);
   -webkit-text-stroke: 0.09em var(--ink);
   paint-order: stroke fill;
