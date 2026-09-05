@@ -19,6 +19,8 @@ export interface RenderPlayer {
   angle: number;
   held: HeldItem | null;
   chopping: boolean;
+  /** Holding the extinguisher trigger (the renderer draws the foam). */
+  spraying: boolean;
   dashing: boolean;
   /** 0..1, how far into the dash we are (for squash/stretch). */
   dashT: number;
@@ -135,6 +137,7 @@ export class SnapshotBuffer {
         angle,
         held: p.held,
         chopping: p.chopping,
+        spraying: p.spraying === true,
         dashing: p.dashMsLeft > 0,
         dashT: p.dashMsLeft > 0 ? Math.min(1, p.dashMsLeft / 150) : 0,
         local: this.localCheck(p.id),

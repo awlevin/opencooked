@@ -4,17 +4,20 @@
 
 import {
   CHOP_MS,
+  EXTINGUISH_MS,
+  type Fire,
   type IngredientType,
   type Snapshot,
   type Tile,
 } from '@/shared/types';
 import {
   drawBurner,
+  drawExtinguisher,
   drawHeldItem,
   drawPlate,
   drawPot,
 } from './ingredients';
-import { PAL, fillStroke, rr, shade } from './theme';
+import { PAL, circle, clamp, fillStroke, rr, shade } from './theme';
 
 const OUT = 0.055; // outline width, tile units
 
@@ -248,6 +251,118 @@ function drawTrash(c: CanvasRenderingContext2D): void {
   fillStroke(c, PAL.binLid, PAL.ink, OUT * 0.9);
 }
 
+/** Wall bracket for the one extinguisher in the kitchen. */
+function drawExtinguisherMount(c: CanvasRenderingContext2D, tile: Tile, time: number): void {
+  slab(c, PAL.counterHi, PAL.counterEdge);
+  // red backing plate, so an empty bracket still shouts "this is where it goes"
+  rr(c, 0.2, 0.14, 0.6, 0.74, 0.1);
+  fillStroke(c, '#9c2b20', PAL.ink, OUT * 0.9);
+  rr(c, 0.26, 0.2, 0.48, 0.62, 0.07);
+  fillStroke(c, 'rgba(255, 226, 178, 0.18)', null, 0);
+
+  const stocked = tile.item?.kind === 'extinguisher';
+  if (stocked) {
+    drawExtinguisher(c, 0.5, 0.5, 0.34, time);
+  } else {
+    // Empty bracket: the painted silhouette still says what belongs here.
+    rr(c, 0.39, 0.3, 0.22, 0.42, 0.07);
+    fillStroke(c, 'rgba(255, 246, 227, 0.3)', null, 0);
+    rr(c, 0.44, 0.22, 0.12, 0.07, 0.03);
+    fillStroke(c, 'rgba(255, 246, 227, 0.3)', null, 0);
+  }
+
+  // two straps across the bottle
+  c.strokeStyle = PAL.metalHi;
+  c.lineWidth = 0.075;
+  c.lineCap = 'round';
+  for (const y of [0.36, 0.68]) {
+    c.beginPath();
+    c.moveTo(0.28, y);
+    c.lineTo(0.72, y);
+    c.stroke();
+  }
+  c.strokeStyle = PAL.ink;
+  c.lineWidth = 0.022;
+  for (const y of [0.36, 0.68]) {
+    c.beginPath();
+    c.moveTo(0.28, y);
+    c.lineTo(0.72, y);
+    c.stroke();
+  }
+}
+
+/**
+ * A tile on fire: glow on the floor, smoke, and a few flickering tongues.
+ * Fire never goes out on its own, so this has to keep reading as urgent for
+ * as long as it burns.
+ */
+export function drawFire(
+  c: CanvasRenderingContext2D,
+  fire: Fire,
+  x: number,
+  y: number,
+  size: number,
+  time: number,
+): void {
+  const s = size;
+  c.save();
+  c.translate(x, y);
+
+  // heat glow spilling onto the neighbouring floor
+  const glow = 0.9 + 0.1 * Math.sin(time * 7.7);
+  const g = c.createRadialGradient(0, 0, 0.06 * s, 0, 0, 1.05 * s * glow);
+  g.addColorStop(0, 'rgba(255, 170, 60, 0.55)');
+  g.addColorStop(0.55, 'rgba(255, 120, 30, 0.22)');
+  g.addColorStop(1, 'rgba(255, 110, 20, 0)');
+  c.fillStyle = g;
+  c.fillRect(-1.1 * s, -1.1 * s, 2.2 * s, 2.2 * s);
+
+  // smoke, behind the flames
+  for (let i = 0; i < 5; i++) {
+    const t = (time * 0.34 + i * 0.2) % 1;
+    c.globalAlpha = 0.42 * (1 - t);
+    circle(c, Math.sin((t + i) * 3.7) * 0.2 * s, (-0.32 - t * 0.95) * s, (0.09 + t * 0.2) * s);
+    c.fillStyle = '#241c18';
+    c.fill();
+  }
+  c.globalAlpha = 1;
+
+  // tongues, back to front: dark red outside, white-hot core
+  const tongues = [
+    { dx: -0.28, w: 0.4, h: 0.62, col: '#c9351f', ph: 0.0, ink: true },
+    { dx: 0.29, w: 0.38, h: 0.56, col: '#e8503a', ph: 1.4, ink: true },
+    { dx: 0.02, w: 0.5, h: 0.92, col: '#f7871f', ph: 2.7, ink: true },
+    { dx: -0.03, w: 0.3, h: 0.58, col: '#ffc94a', ph: 4.1, ink: false },
+    { dx: 0.01, w: 0.15, h: 0.32, col: '#fff2c4', ph: 5.2, ink: false },
+  ];
+  for (const t of tongues) {
+    const h = t.h * s * (0.86 + 0.18 * Math.sin(time * 9 + t.ph));
+    const w = t.w * s * (0.94 + 0.1 * Math.sin(time * 13 + t.ph * 2));
+    const lean = Math.sin(time * 5.5 + t.ph) * 0.1 * s;
+    const bx = t.dx * s;
+    const by = 0.34 * s;
+    c.beginPath();
+    c.moveTo(bx - w / 2, by);
+    c.quadraticCurveTo(bx - w * 0.72, by - h * 0.52, bx + lean, by - h);
+    c.quadraticCurveTo(bx + w * 0.72, by - h * 0.46, bx + w / 2, by);
+    c.quadraticCurveTo(bx, by + h * 0.1, bx - w / 2, by);
+    c.closePath();
+    fillStroke(c, t.col, t.ink ? PAL.ink : null, t.ink ? OUT * 0.7 * s : 0);
+  }
+
+  // how much foam has landed, as a ring round the tile
+  if (fire.sprayMs > 0) {
+    const frac = clamp(fire.sprayMs / EXTINGUISH_MS, 0, 1);
+    c.beginPath();
+    c.arc(0, 0, 0.46 * s, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac);
+    c.strokeStyle = '#eaf6ff';
+    c.lineWidth = 0.09 * s;
+    c.lineCap = 'round';
+    c.stroke();
+  }
+  c.restore();
+}
+
 /** One station tile, drawn into the unit box. */
 export function drawTile(
   c: CanvasRenderingContext2D,
@@ -257,10 +372,15 @@ export function drawTile(
   switch (tile.t) {
     case 'floor':
       return;
-    case 'counter':
+    case 'counter': {
       slab(c, PAL.counterHi, PAL.counterEdge);
-      if (tile.item) drawHeldItem(c, tile.item, 0.5, 0.44, 0.28, time);
+      const item = tile.item;
+      // A pot parked on a counter is drawn at cookware scale, not item scale,
+      // and without the cooking dial: nothing cooks off the ring.
+      if (item?.kind === 'pot') drawPot(c, item.pot, 0.5, 0.5, 0.62, time, false);
+      else if (item) drawHeldItem(c, item, 0.5, 0.44, 0.28, time);
       return;
+    }
     case 'crate':
       drawCrate(c, tile.crate ?? 'onion');
       return;
@@ -282,6 +402,9 @@ export function drawTile(
     case 'trash':
       drawTrash(c);
       return;
+    case 'extinguisher':
+      drawExtinguisherMount(c, tile, time);
+      return;
   }
 }
 
@@ -301,6 +424,8 @@ export function drawKitchen(
       c.translate(x * T, y * T);
       c.scale(T, T);
       drawTile(c, tile, time);
+      // Flames sit on top of whatever is burning.
+      if (tile.fire) drawFire(c, tile.fire, 0.5, 0.5, 1, time);
       c.restore();
     }
   }

@@ -101,7 +101,7 @@ export function drawPlayer(
     ellipse(c, hx, hyy + R * 0.5, R * 0.5, R * 0.2);
     c.fillStyle = 'rgba(30, 16, 8, 0.22)';
     c.fill();
-    drawHeldItem(c, p.held, hx, hyy, R * 0.62);
+    drawHeldItem(c, p.held, hx, hyy, R * 0.62, time);
   };
   if (facingAway) drawHeld();
 
@@ -172,6 +172,45 @@ export function drawPlayer(
   c.restore(); // squash
 
   if (!facingAway) drawHeld();
+
+  // spraying: a cone of foam out of the horn, toward whatever is in front
+  if (p.spraying) {
+    const reach = R * 3.4;
+    const spread = R * 1.05;
+    c.save();
+    c.beginPath();
+    c.moveTo(dx * R * 1.15 + ex * R * 0.18, dy * R * 1.15 + ey * R * 0.18);
+    c.lineTo(dx * reach + ex * spread, dy * reach + ey * spread);
+    c.lineTo(dx * reach - ex * spread, dy * reach - ey * spread);
+    c.closePath();
+    c.fillStyle = 'rgba(240, 250, 255, 0.5)';
+    c.fill();
+    for (let i = 0; i < 8; i++) {
+      const t = (time * 1.9 + i * 0.13) % 1;
+      const side = i % 2 === 0 ? 1 : -1;
+      const off = side * spread * t * (0.55 + (i % 3) * 0.24);
+      const d = R * 1.1 + t * (reach - R * 1.1);
+      c.globalAlpha = 0.95 * (1 - t * 0.55);
+      circle(c, dx * d + ex * off, dy * d + ey * off, R * (0.2 + t * 0.5));
+      c.fillStyle = '#f7fdff';
+      c.fill();
+    }
+    // foam piling up where the cone lands
+    for (let i = 0; i < 4; i++) {
+      const t = (time * 2.6 + i * 0.25) % 1;
+      const a = i * 1.7 + time * 1.3;
+      c.globalAlpha = 0.75 * (1 - t);
+      circle(
+        c,
+        dx * reach + Math.cos(a) * R * (0.5 + t * 1.1),
+        dy * reach + Math.sin(a) * R * (0.5 + t * 1.1),
+        R * (0.22 + t * 0.3),
+      );
+      c.fillStyle = '#ffffff';
+      c.fill();
+    }
+    c.restore();
+  }
 
   // chopping: knife jabbing at the board in front
   if (p.chopping) {

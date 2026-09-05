@@ -25,6 +25,8 @@ import {
 
 /** Width the pot artwork was authored at, in tile units. */
 const POT_SIZE = 0.66;
+/** Width the extinguisher artwork was authored at, in tile units. */
+const EXT_SIZE = 0.42;
 /** Outline width for the cookware, in the pot's own authored units. */
 const POT_OUT = 0.055;
 
@@ -251,6 +253,10 @@ export function drawBurner(
  * A cooking pot, wherever it is: on a ring, on a counter, or in two hands.
  * `size` is the width of the body in the caller's units; everything else is
  * proportional to it, so one routine serves every context.
+ *
+ * `onHeat` says whether this pot's timers are actually running. Off the ring
+ * they are frozen, and a countdown ring that never moves would be a lie — so
+ * the pot keeps its steam and its contents, but loses the dial.
  */
 export function drawPot(
   c: CanvasRenderingContext2D,
@@ -259,6 +265,7 @@ export function drawPot(
   y: number,
   size: number,
   time: number,
+  onHeat = true,
 ): void {
   const k = size / POT_SIZE;
   const burnt = pot.state === 'burnt';
@@ -329,25 +336,29 @@ export function drawPot(
 
   // state feedback
   if (pot.state === 'cooking') {
-    const frac = clamp(pot.cookMs / COOK_MS, 0, 1);
-    c.beginPath();
-    c.arc(0, 0, 0.45, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac);
-    c.strokeStyle = PAL.amber;
-    c.lineWidth = 0.075;
-    c.lineCap = 'round';
-    c.stroke();
+    if (onHeat) {
+      const frac = clamp(pot.cookMs / COOK_MS, 0, 1);
+      c.beginPath();
+      c.arc(0, 0, 0.45, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac);
+      c.strokeStyle = PAL.amber;
+      c.lineWidth = 0.075;
+      c.lineCap = 'round';
+      c.stroke();
+    }
     drawSteam(c, 0, -0.3, 0.15, time * 0.8, 'rgba(255,255,255,0.5)');
   } else if (done) {
     // the pot keeps a timer running toward burnt; accept either convention
     // (reset-to-zero or continuing past COOK_MS).
-    const since = pot.cookMs >= COOK_MS ? pot.cookMs - COOK_MS : pot.cookMs;
-    const left = clamp(1 - since / BURN_MS, 0, 1);
-    c.beginPath();
-    c.arc(0, 0, 0.45, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * left);
-    c.strokeStyle = left > 0.35 ? '#4ce08c' : PAL.tomato;
-    c.lineWidth = 0.075;
-    c.lineCap = 'round';
-    c.stroke();
+    if (onHeat) {
+      const since = pot.cookMs >= COOK_MS ? pot.cookMs - COOK_MS : pot.cookMs;
+      const left = clamp(1 - since / BURN_MS, 0, 1);
+      c.beginPath();
+      c.arc(0, 0, 0.45, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * left);
+      c.strokeStyle = left > 0.35 ? '#4ce08c' : PAL.tomato;
+      c.lineWidth = 0.075;
+      c.lineCap = 'round';
+      c.stroke();
+    }
     drawSteam(c, 0, -0.32, 0.18, time, 'rgba(190,255,215,0.85)');
   } else if (burnt) {
     for (let i = 0; i < 4; i++) {
@@ -360,6 +371,80 @@ export function drawPot(
     c.globalAlpha = 1;
   }
 
+  c.restore();
+}
+
+/**
+ * The fire extinguisher: red bottle, black cap, hose looped round to a horn.
+ * `size` is the width of the bottle, everything else follows from it.
+ */
+export function drawExtinguisher(
+  c: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number,
+  time: number,
+): void {
+  const k = size / EXT_SIZE;
+  const OUT = 0.05;
+  c.save();
+  c.translate(x, y);
+  c.scale(k, k);
+
+  // hose, behind the bottle: up out of the valve, round and back down
+  c.beginPath();
+  c.moveTo(0.12, -0.3);
+  c.bezierCurveTo(0.46, -0.34, 0.5, 0.02, 0.3, 0.16);
+  c.strokeStyle = PAL.ink;
+  c.lineWidth = 0.13;
+  c.lineCap = 'round';
+  c.stroke();
+  c.strokeStyle = '#4a4a52';
+  c.lineWidth = 0.075;
+  c.stroke();
+  // horn
+  c.beginPath();
+  c.moveTo(0.24, 0.09);
+  c.lineTo(0.42, 0.13);
+  c.lineTo(0.42, 0.3);
+  c.lineTo(0.24, 0.23);
+  c.closePath();
+  fillStroke(c, '#2f2f36', PAL.ink, OUT);
+
+  // bottle
+  const g = c.createLinearGradient(-0.21, 0, 0.21, 0);
+  g.addColorStop(0, '#a32a20');
+  g.addColorStop(0.42, '#e0402c');
+  g.addColorStop(1, '#8f231b');
+  rr(c, -0.21, -0.26, 0.42, 0.68, 0.13);
+  fillStroke(c, g, PAL.ink, OUT * 1.1);
+  // label band
+  rr(c, -0.19, -0.04, 0.38, 0.19, 0.05);
+  fillStroke(c, PAL.cream, null, 0);
+  c.beginPath();
+  c.moveTo(-0.04, 0.13);
+  c.lineTo(0.02, 0.02);
+  c.lineTo(-0.01, 0.02);
+  c.lineTo(0.05, -0.03);
+  c.strokeStyle = PAL.tomato;
+  c.lineWidth = 0.045;
+  c.lineJoin = 'round';
+  c.stroke();
+  // shoulder + cap + trigger handle
+  rr(c, -0.15, -0.36, 0.3, 0.13, 0.05);
+  fillStroke(c, '#2f2f36', PAL.ink, OUT);
+  rr(c, -0.05, -0.46, 0.2, 0.08, 0.04);
+  fillStroke(c, '#2f2f36', PAL.ink, OUT);
+  // pressure gauge, needle twitching in the green
+  circle(c, -0.13, -0.44, 0.075);
+  fillStroke(c, '#f6f2e4', PAL.ink, OUT * 0.9);
+  c.beginPath();
+  c.moveTo(-0.13, -0.44);
+  const a = -Math.PI / 2 + Math.sin(time * 2.1) * 0.35;
+  c.lineTo(-0.13 + Math.cos(a) * 0.05, -0.44 + Math.sin(a) * 0.05);
+  c.strokeStyle = PAL.green;
+  c.lineWidth = 0.03;
+  c.stroke();
   c.restore();
 }
 
@@ -380,8 +465,12 @@ export function drawHeldItem(
       drawIngredient(c, item.ing, x, y, r * 0.86);
       return;
     case 'pot':
-      // A pot is bigger than a plate and sits a touch lower in the hands.
-      drawPot(c, item.pot, x, y + r * 0.12, r * 2.1, time);
+      // Both hands: a pot is heavier and wider than a plate, and it hangs a
+      // little lower. Off the ring, so no cooking dial.
+      drawPot(c, item.pot, x, y + r * 0.16, r * 2.6, time, false);
+      return;
+    case 'extinguisher':
+      drawExtinguisher(c, x, y, r * 1.35, time);
       return;
   }
 }
