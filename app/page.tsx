@@ -66,6 +66,26 @@ export default function HostPage() {
             </div>
           </div>
 
+          <div className="card level-card">
+            <canvas data-el="levelMap" className="level-map" width={8} height={8} />
+            <div className="level-info">
+              <div data-el="levelWorld" className="card-label level-world">
+                Home Kitchen
+              </div>
+              <div data-el="levelName" className="level-name">
+                Mise en place
+              </div>
+              <div className="level-line">
+                <span data-el="levelStep" className="level-step">
+                  1 / 3
+                </span>
+                <span data-el="levelMenu" className="level-menu">
+                  Onion Soup
+                </span>
+              </div>
+            </div>
+          </div>
+
           <p className="instruction">
             Scan to join — any chef presses <b>Start</b>
           </p>
@@ -85,6 +105,9 @@ export default function HostPage() {
         </div>
         <div className="stack">
           <div className="kicker">Service is over</div>
+          <div data-el="overLevel" className="over-level">
+            Home Kitchen · Mise en place
+          </div>
           <div data-el="stars" className="stars" />
           <div className="final-score">
             <div

@@ -1,5 +1,6 @@
 // Results screen: final score, served / missed tallies, star rating.
 
+import { levelById, worldOf } from '@/shared/levels';
 import { q } from './dom';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -34,6 +35,7 @@ export class GameOverScreen {
   private readonly servedEl: HTMLSpanElement;
   private readonly missedEl: HTMLSpanElement;
   private readonly verdictEl: HTMLDivElement;
+  private readonly levelEl: HTMLDivElement;
 
   constructor(root: ParentNode) {
     this.starsEl = q<HTMLDivElement>(root, '[data-el="stars"]');
@@ -41,6 +43,17 @@ export class GameOverScreen {
     this.servedEl = q<HTMLSpanElement>(root, '[data-el="finalServed"]');
     this.missedEl = q<HTMLSpanElement>(root, '[data-el="finalMissed"]');
     this.verdictEl = q<HTMLDivElement>(root, '[data-el="verdict"]');
+    this.levelEl = q<HTMLDivElement>(root, '[data-el="overLevel"]');
+  }
+
+  /** Name the kitchen that was just cooked in, under "Service is over". */
+  setLevel(levelId: string): void {
+    try {
+      const level = levelById(levelId);
+      this.levelEl.textContent = `${worldOf(levelId)?.name ?? ''} · ${level.name}`;
+    } catch {
+      this.levelEl.textContent = '';
+    }
   }
 
   show(score: number, served: number, missed: number): void {

@@ -130,6 +130,11 @@ body {
   padding: clamp(18px, 3.2vh, 44px) clamp(20px, 3vw, 64px);
   gap: clamp(16px, 3vh, 46px);
 }
+/* The lobby carries one row more than the results screen (the level card),
+   so it runs a tighter rhythm to stay inside 16:9 without scrolling. */
+.host-root .screen-lobby .stack {
+  gap: clamp(10px, 2.1vh, 30px);
+}
 
 /* --- title --- */
 .host-root .title {
@@ -232,8 +237,8 @@ body {
 }
 .host-root .qr-frame canvas {
   display: block;
-  width: clamp(160px, 24vh, 460px);
-  height: clamp(160px, 24vh, 460px);
+  width: clamp(150px, 20vh, 400px);
+  height: clamp(150px, 20vh, 400px);
   border-radius: 4px;
 }
 .host-root .join-url {
@@ -244,6 +249,65 @@ body {
   word-break: break-all;
   text-align: center;
   line-height: 1.15;
+}
+
+/* --- level card ---
+   The kitchen the room is about to cook in: its map, in that world's own
+   colours, next to its name. Same card stock as the join panels, laid out
+   sideways so the shape of the room is what you notice first. */
+.host-root .level-card {
+  flex-direction: row;
+  align-items: center;
+  gap: clamp(12px, 1.6vw, 30px);
+  padding: clamp(10px, 1.2vh, 20px) clamp(14px, 1.6vw, 30px);
+  transform: rotate(-0.7deg);
+  max-width: min(92vw, 1400px);
+}
+.host-root .level-map {
+  display: block;
+  width: auto;
+  height: clamp(58px, 9.5vh, 150px);
+  border-radius: clamp(4px, 0.6vw, 10px);
+  image-rendering: pixelated;
+}
+.host-root .level-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.12em;
+  min-width: 0;
+}
+.host-root .level-world {
+  color: var(--ink-soft);
+  opacity: 0.85;
+}
+.host-root .level-name {
+  font-size: clamp(24px, 3vw, 84px);
+  font-weight: 800;
+  line-height: 1.02;
+  color: var(--ink);
+}
+.host-root .level-line {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  font-size: clamp(13px, 1.25vw, 34px);
+  font-weight: 700;
+  color: var(--ink-soft);
+  min-width: 0;
+}
+.host-root .level-step {
+  flex: none;
+  padding: 0.1em 0.7em 0.16em;
+  border-radius: 999px;
+  background: var(--butter);
+  border: 0.12em solid var(--ink);
+  color: #2a1710;
+}
+.host-root .level-menu {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .host-root .instruction {
@@ -370,6 +434,15 @@ body {
 }
 
 /* --- gameover --- */
+.host-root .over-level {
+  margin-top: -0.4em;
+  font-size: clamp(18px, 2vw, 56px);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--cream-2);
+  opacity: 0.85;
+  text-shadow: 0 0.08em 0 rgba(29, 16, 9, 0.6);
+}
 .host-root .screen-over .stack {
   justify-content: center;
   gap: clamp(8px, 1.8vh, 26px);

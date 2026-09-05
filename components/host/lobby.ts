@@ -3,8 +3,10 @@
 // The join URL is built here, on the client, from the page's own origin —
 // the server never sees it. `/join?room=CODE` is the controller route.
 
+import { levelById, worldOf } from '@/shared/levels';
 import type { LobbyPlayer } from '@/shared/types';
 import { q } from './dom';
+import { drawMiniMap, menuLine } from './levelcard';
 
 const QR_PIXELS = 760; // rendered large, displayed small = crisp on a TV
 
@@ -18,21 +20,56 @@ export class LobbyScreen {
   private readonly urlEl: HTMLDivElement;
   private readonly qrEl: HTMLCanvasElement;
   private readonly rosterEl: HTMLDivElement;
+  private readonly levelNameEl: HTMLDivElement;
+  private readonly levelWorldEl: HTMLDivElement;
+  private readonly levelStepEl: HTMLDivElement;
+  private readonly levelMenuEl: HTMLDivElement;
+  private readonly levelMapEl: HTMLCanvasElement;
   private readonly chips = new Map<string, HTMLElement>();
   private qrUrl = '';
   /** Bumped on every reset so a late QR render cannot paint a dead code. */
   private qrGen = 0;
+  private levelId = '';
 
   constructor(root: ParentNode) {
     this.codeEl = q<HTMLDivElement>(root, '[data-el="roomCode"]');
     this.urlEl = q<HTMLDivElement>(root, '[data-el="joinUrl"]');
     this.qrEl = q<HTMLCanvasElement>(root, '[data-el="qr"]');
     this.rosterEl = q<HTMLDivElement>(root, '[data-el="roster"]');
+    this.levelNameEl = q<HTMLDivElement>(root, '[data-el="levelName"]');
+    this.levelWorldEl = q<HTMLDivElement>(root, '[data-el="levelWorld"]');
+    this.levelStepEl = q<HTMLDivElement>(root, '[data-el="levelStep"]');
+    this.levelMenuEl = q<HTMLDivElement>(root, '[data-el="levelMenu"]');
+    this.levelMapEl = q<HTMLCanvasElement>(root, '[data-el="levelMap"]');
     this.reset();
+  }
+
+  /**
+   * Show the kitchen the room is set to. Called from every lobby broadcast, so
+   * a phone's choice lands here whoever made it and however late they joined.
+   */
+  setLevel(levelId: string): void {
+    if (levelId === this.levelId) return;
+    let level;
+    try {
+      level = levelById(levelId);
+    } catch {
+      return; // an id this build does not know: keep showing the last one
+    }
+    this.levelId = levelId;
+    const world = worldOf(levelId);
+    this.levelNameEl.textContent = level.name;
+    this.levelWorldEl.textContent = world?.name ?? '';
+    this.levelStepEl.textContent = `${level.index} / ${level.count}`;
+    this.levelMenuEl.textContent = menuLine(levelId);
+    drawMiniMap(this.levelMapEl, levelId);
   }
 
   reset(): void {
     this.qrGen += 1;
+    // Force the next lobby broadcast to repaint the card, even if the new room
+    // happens to open on the level the last one was showing.
+    this.levelId = '';
     this.codeEl.textContent = '····';
     this.codeEl.classList.add('pending');
     this.urlEl.textContent = 'connecting…';

@@ -1,5 +1,6 @@
 // Screen builders. Each returns a detached element; the app swaps them in.
 
+import { LEVELS, levelById, nextLevelId, worldOf } from '@/shared/levels';
 import type { LobbyPlayer } from '@/shared/types';
 import { el } from './dom';
 
@@ -116,7 +117,53 @@ export interface LobbyProps {
   players: LobbyPlayer[];
   playerId: string;
   busy: boolean;
+  levelId: string;
   onStart: () => void;
+  onSelect: (levelId: string) => void;
+}
+
+/**
+ * The kitchen chooser: one step back, one step forward, through every level of
+ * every world in playing order. Any chef may move it, and the TV follows —
+ * which is the whole reason it is two big arrows and no menu.
+ */
+function levelPicker(levelId: string, onSelect: (id: string) => void): HTMLElement {
+  const row = el('div', 'level-pick');
+  const i = LEVELS.findIndex((l) => l.id === levelId);
+  const step = (delta: number): void => {
+    const next = LEVELS[i + delta];
+    if (next) onSelect(next.id);
+  };
+
+  const arrow = (label: string, delta: number): HTMLButtonElement => {
+    const b = el('button', 'level-pick__arrow', label);
+    b.type = 'button';
+    b.disabled = i < 0 || LEVELS[i + delta] === undefined;
+    b.setAttribute('aria-label', delta < 0 ? 'Previous kitchen' : 'Next kitchen');
+    b.addEventListener('click', () => step(delta));
+    return b;
+  };
+
+  const body = el('div', 'level-pick__body');
+  let world = '';
+  let name = levelId;
+  let stepLabel = '';
+  try {
+    const level = levelById(levelId);
+    world = worldOf(levelId)?.name ?? '';
+    name = level.name;
+    stepLabel = `${level.index} / ${level.count}`;
+  } catch {
+    // An id this build does not know: show it raw rather than an empty row.
+  }
+  body.appendChild(el('span', 'level-pick__world', world));
+  body.appendChild(el('span', 'level-pick__name', name));
+  body.appendChild(el('span', 'level-pick__step', stepLabel));
+
+  row.appendChild(arrow('‹', -1));
+  row.appendChild(body);
+  row.appendChild(arrow('›', 1));
+  return row;
 }
 
 export function lobbyScreen(p: LobbyProps): HTMLElement {
@@ -151,11 +198,14 @@ export function lobbyScreen(p: LobbyProps): HTMLElement {
   rosterWrap.appendChild(roster);
   root.appendChild(rosterWrap);
 
+  const actions = el('div', 'actions');
+  actions.appendChild(levelPicker(p.levelId, p.onSelect));
   const start = el('button', 'big-btn big-btn--hero', p.busy ? 'STARTING…' : 'START');
   start.type = 'button';
   start.disabled = p.busy;
   start.addEventListener('click', () => p.onStart());
-  root.appendChild(start);
+  actions.appendChild(start);
+  root.appendChild(actions);
 
   return root;
 }
@@ -167,7 +217,9 @@ export interface GameOverProps {
   served: number;
   missed: number;
   busy: boolean;
+  levelId: string;
   onAgain: () => void;
+  onNext: (levelId: string) => void;
 }
 
 export function gameOverScreen(p: GameOverProps): HTMLElement {
@@ -192,11 +244,26 @@ export function gameOverScreen(p: GameOverProps): HTMLElement {
   }
   root.appendChild(stats);
 
-  const again = el('button', 'big-btn big-btn--hero', p.busy ? 'WAITING…' : 'PLAY AGAIN');
+  const actions = el('div', 'actions');
+  const next = nextLevelId(p.levelId);
+  if (next) {
+    // Forward is the offer; playing the same level again is the fallback.
+    const nextBtn = el('button', 'big-btn big-btn--hero', p.busy ? 'WAITING…' : 'NEXT LEVEL');
+    nextBtn.type = 'button';
+    nextBtn.disabled = p.busy;
+    nextBtn.addEventListener('click', () => p.onNext(next));
+    actions.appendChild(nextBtn);
+  }
+  const again = el(
+    'button',
+    next ? 'big-btn big-btn--ghost' : 'big-btn big-btn--hero',
+    p.busy ? 'WAITING…' : 'PLAY AGAIN',
+  );
   again.type = 'button';
   again.disabled = p.busy;
   again.addEventListener('click', () => p.onAgain());
-  root.appendChild(again);
+  actions.appendChild(again);
+  root.appendChild(actions);
 
   return root;
 }

@@ -61,6 +61,8 @@ export function mountHostApp(
   let sim: HostSim | null = null;
   // Last figures seen in a snapshot, used if `gameover` ever arrives first.
   let tally = { score: 0, served: 0, missed: 0 };
+  /** The kitchen this room is set to, from the lobby broadcast or a snapshot. */
+  let levelId = '';
 
   /** True for a chef whose phone is wired straight into this tab. */
   const isLocal = (id: string): boolean => sim?.isPeerSeat(id) === true;
@@ -115,6 +117,7 @@ export function mountHostApp(
   function resetToLobby(): void {
     buffer.clear();
     lobby.reset();
+    levelId = '';
     tally = { score: 0, served: 0, missed: 0 };
     view.stop();
     phase = 'lobby';
@@ -179,11 +182,19 @@ export function mountHostApp(
 
   // --- messages ------------------------------------------------------------
 
+  function setLevel(next: string): void {
+    if (!next || next === levelId) return;
+    levelId = next;
+    lobby.setLevel(next);
+    over.setLevel(next);
+  }
+
   /** Game traffic, from whichever side of the room is authoritative. */
   function handle(msg: S2C): void {
     switch (msg.t) {
       case 'lobby':
         lobby.setPlayers(msg.players, isLocal);
+        setLevel(msg.levelId);
         // Only chase peer connections for a room we are actually running.
         hub.setRoster(sim?.running ? msg.players.map((p) => p.id) : []);
         break;
@@ -196,6 +207,7 @@ export function mountHostApp(
         setPhase(msg.phase);
         break;
       case 'state':
+        setLevel(msg.s.levelId);
         tally = {
           score: msg.s.score,
           served: msg.s.served,

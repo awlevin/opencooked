@@ -7,6 +7,7 @@
 // unmount — and destroy must be total, because StrictMode mounts twice and a
 // leaked socket would join the room twice.
 
+import { DEFAULT_LEVEL_ID } from '@/shared/levels';
 import type { S2C } from '@/shared/protocol';
 import type { LobbyPlayer, Phase, Vec2 } from '@/shared/types';
 import { clear, el } from './dom';
@@ -50,6 +51,8 @@ export class ControllerApp {
   private playerId = '';
   private color = DEFAULT_ACCENT;
   private players: LobbyPlayer[] = [];
+  /** The kitchen the room is set to; the lobby broadcast is the truth. */
+  private levelId = DEFAULT_LEVEL_ID;
   private phase: Phase | null = null;
   private result: GameOverData = { score: 0, served: 0, missed: 0 };
 
@@ -153,8 +156,23 @@ export class ControllerApp {
     this.net.join(room, name);
   }
 
+  /**
+   * Move the room to another kitchen. The arrows repaint straight away rather
+   * than waiting for the round trip — a chooser that lags feels broken — and
+   * the server's lobby broadcast is still what decides in the end.
+   */
+  private selectLevel(levelId: string): void {
+    if (levelId === this.levelId) return;
+    this.levelId = levelId;
+    this.net.send({ t: 'select', levelId });
+    this.render();
+  }
+
   /** Runs a start/again request with a bail-out so the UI never sticks. */
-  private sendWithTimeout(msg: { t: 'start' } | { t: 'again' }, from: Screen): void {
+  private sendWithTimeout(
+    msg: { t: 'start' } | { t: 'again'; levelId?: string },
+    from: Screen,
+  ): void {
     this.busy = true;
     this.net.send(msg);
     this.render();
@@ -206,6 +224,7 @@ export class ControllerApp {
       }
       case 'lobby': {
         this.players = msg.players;
+        this.levelId = msg.levelId;
         if (this.screen === 'lobby') this.render();
         break;
       }
@@ -324,7 +343,9 @@ export class ControllerApp {
             players: this.players,
             playerId: this.playerId,
             busy: this.busy,
+            levelId: this.levelId,
             onStart: () => this.sendWithTimeout({ t: 'start' }, 'lobby'),
+            onSelect: (levelId) => this.selectLevel(levelId),
           }),
         );
         break;
@@ -348,7 +369,9 @@ export class ControllerApp {
           gameOverScreen({
             ...this.result,
             busy: this.busy,
+            levelId: this.levelId,
             onAgain: () => this.sendWithTimeout({ t: 'again' }, 'gameover'),
+            onNext: (levelId) => this.sendWithTimeout({ t: 'again', levelId }, 'gameover'),
           }),
         );
         break;

@@ -283,6 +283,111 @@ body {
   box-shadow: 0 6px 0 rgba(0, 0, 0, 0.4);
 }
 
+/* A ghost twin of the big button: same shape and rhythm, less voice. Used
+   where two actions sit together and only one of them is the way forward. */
+.big-btn--ghost {
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--panel-hi), var(--panel));
+  border: 1px solid var(--accent-hairline);
+  box-shadow:
+    0 6px 0 rgba(0, 0, 0, 0.45),
+    0 10px 20px rgba(0, 0, 0, 0.35);
+}
+
+.big-btn--ghost:active:not(:disabled) {
+  box-shadow:
+    0 2px 0 rgba(0, 0, 0, 0.45),
+    0 4px 10px rgba(0, 0, 0, 0.35);
+}
+
+/* The buttons at the bottom of a screen, and whatever sits with them. The
+   bottom padding is the big button's own drop shadow: without it the button
+   looks cropped against the edge of the phone. */
+.actions {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+  padding-bottom: 10px;
+}
+
+/* ----------------------------- level chooser ----------------------------- */
+
+/* Two arrows and the name between them: any chef can move the whole room to
+   another kitchen, and the TV follows. Thumb-sized, like everything else. */
+.level-pick {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.level-pick__arrow {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 64px;
+  min-height: 64px;
+  border-radius: 18px;
+  border: 1px solid var(--edge);
+  background: var(--panel);
+  color: var(--accent-bright);
+  font: inherit;
+  font-size: 30px;
+  line-height: 1;
+  touch-action: manipulation;
+  transition:
+    transform 90ms ease,
+    filter 160ms ease;
+}
+
+.level-pick__arrow:active:not(:disabled) {
+  transform: translateY(3px);
+}
+
+.level-pick__arrow:disabled {
+  color: var(--muted);
+  filter: brightness(0.7);
+}
+
+.level-pick__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 18px;
+  background: var(--accent-faint);
+  border: 1px solid var(--accent-hairline);
+}
+
+.level-pick__world {
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  margin-right: -0.22em;
+  text-transform: uppercase;
+  color: var(--accent-bright);
+}
+
+.level-pick__name {
+  font-size: 19px;
+  color: var(--ink);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.level-pick__step {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  margin-right: -0.18em;
+  color: var(--muted);
+}
+
 /* --------------------------------- lobby --------------------------------- */
 
 .screen--lobby {
@@ -447,6 +552,7 @@ body {
   margin-right: -0.24em;
 }
 
+.screen--over .actions,
 .screen--over .big-btn {
   width: min(420px, 100%);
 }
@@ -823,6 +929,16 @@ body {
     width: 18px;
     height: 18px;
   }
+
+  .level-pick__arrow {
+    width: 54px;
+    min-height: 54px;
+    font-size: 26px;
+  }
+
+  .level-pick__name {
+    font-size: 17px;
+  }
 }
 
 /* Very short viewports (small phones in landscape): drop the eyebrow and
@@ -888,6 +1004,20 @@ body {
 
   .screen--over {
     gap: 10px;
+  }
+
+  .level-pick__arrow {
+    width: 48px;
+    min-height: 48px;
+    font-size: 22px;
+  }
+
+  .level-pick__body {
+    padding: 4px 8px;
+  }
+
+  .level-pick__name {
+    font-size: 16px;
   }
 }
 
