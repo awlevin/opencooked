@@ -15,7 +15,7 @@ import {
   drawExtinguisher,
   drawHeldItem,
   drawPlate,
-  drawPot,
+  drawVessel,
 } from './ingredients';
 import { PAL, circle, clamp, fillStroke, rr, shade } from './theme';
 
@@ -377,7 +377,7 @@ export function drawTile(
       const item = tile.item;
       // A pot parked on a counter is drawn at cookware scale, not item scale,
       // and without the cooking dial: nothing cooks off the ring.
-      if (item?.kind === 'pot') drawPot(c, item.pot, 0.5, 0.5, 0.62, time, false);
+      if (item?.kind === 'pot') drawVessel(c, item.pot, 0.5, 0.5, 0.62, time, false);
       else if (item) drawHeldItem(c, item, 0.5, 0.44, 0.28, time);
       return;
     }
@@ -391,7 +391,7 @@ export function drawTile(
       slab(c, PAL.metalHi, PAL.metalDark);
       // The ring is always there; the pot may have been carried off.
       drawBurner(c, 0.5, 0.5, 0.66, time);
-      if (tile.pot) drawPot(c, tile.pot, 0.5, 0.5, 0.66, time);
+      if (tile.pot) drawVessel(c, tile.pot, 0.5, 0.5, 0.66, time);
       return;
     case 'plates':
       drawPlates(c);

@@ -1,6 +1,7 @@
 // Top bar: score, round clock, and the order queue as little paper tickets.
 // Sized off `u` (1 = a 1920x1080 screen) so text stays couch-legible.
 
+import { DISHES } from '@/shared/catalogue';
 import type { Order, Snapshot } from '@/shared/types';
 import { drawTicketIcon } from './ingredients';
 import { PAL, clamp, fillStroke, font, rr, text } from './theme';
@@ -162,18 +163,34 @@ function drawTicket(
     Math.max(2, u * 4),
   );
 
-  // perforated header strip
-  rr(c, u * 7, u * 7, w - u * 14, u * 8, u * 4);
-  c.fillStyle = 'rgba(107, 69, 38, 0.22)';
+  // the dish, named across the top of the ticket
+  rr(c, u * 7, u * 6, w - u * 14, u * 27, u * 8);
+  c.fillStyle = 'rgba(107, 69, 38, 0.16)';
   c.fill();
+  const dish = DISHES[order.dish];
+  const label = (dish?.name ?? '').toUpperCase();
+  const maxW = w - u * 20;
+  // Shrink long names to fit rather than clipping them: a ticket you cannot
+  // read is worse than a ticket in slightly smaller type.
+  let nameSize = u * 21;
+  const track = u * 1.5;
+  const measured = widthOf(c, label, nameSize, 800, track);
+  if (measured > maxW) nameSize *= maxW / measured;
+  text(c, label, w / 2, inkY(c, label, nameSize, u * 19.5), {
+    size: nameSize,
+    weight: 800,
+    fill: 'rgba(59, 35, 20, 0.9)',
+    baseline: 'alphabetic',
+    letterSpacing: track,
+  });
 
   const n = Math.max(1, order.recipe.length);
-  const iconR = Math.min(u * 21, (w - u * 18) / (n * 2.25));
+  const iconR = Math.min(u * 20, (w - u * 18) / (n * 2.25));
   const step = (w - u * 16) / n;
   for (let i = 0; i < n; i++) {
     const ing = order.recipe[i];
     if (!ing) continue;
-    drawTicketIcon(c, ing, u * 8 + step * (i + 0.5), h * 0.46, iconR);
+    drawTicketIcon(c, ing, u * 8 + step * (i + 0.5), h * 0.56, iconR);
   }
 
   // draining time bar
