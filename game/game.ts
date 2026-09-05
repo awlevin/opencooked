@@ -97,11 +97,23 @@ function num(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;
 }
 
+function clonePot(pot: Pot): Pot {
+  return { contents: [...pot.contents], cookMs: num(pot.cookMs), state: pot.state };
+}
+
 function cloneItem(item: HeldItem | null | undefined): HeldItem | null {
   if (!item) return null;
-  return item.kind === 'ingredient'
-    ? { kind: 'ingredient', ing: { type: item.ing.type, chopped: item.ing.chopped === true } }
-    : { kind: 'plate', soup: item.soup ? [...item.soup] : null };
+  switch (item.kind) {
+    case 'ingredient':
+      return {
+        kind: 'ingredient',
+        ing: { type: item.ing.type, chopped: item.ing.chopped === true },
+      };
+    case 'plate':
+      return { kind: 'plate', soup: item.soup ? [...item.soup] : null };
+    case 'pot':
+      return { kind: 'pot', pot: clonePot(item.pot) };
+  }
 }
 
 function cloneTile(tile: Tile): Tile {
@@ -109,13 +121,9 @@ function cloneTile(tile: Tile): Tile {
   if (tile.crate) out.crate = tile.crate;
   if (tile.item !== undefined) out.item = cloneItem(tile.item);
   if (tile.chopMs !== undefined) out.chopMs = num(tile.chopMs);
-  if (tile.pot) {
-    out.pot = {
-      contents: [...tile.pot.contents],
-      cookMs: num(tile.pot.cookMs),
-      state: tile.pot.state,
-    };
-  }
+  // `null` is meaningful on a stove (a ring whose pot was carried off), so the
+  // key survives the round trip even when there is no pot.
+  if (tile.pot !== undefined) out.pot = tile.pot ? clonePot(tile.pot) : null;
   return out;
 }
 
@@ -308,9 +316,32 @@ export class Game {
   }
 
   removePlayer(id: string): void {
-    if (!this.rts.delete(id)) return;
+    const rt = this.rts.get(id);
+    if (!rt) return;
+    // A chef whose phone dies must not take the kitchen's cookware with them:
+    // the round has a fixed number of pots and exactly one extinguisher.
+    this.returnCookware(rt.s.held);
+    this.rts.delete(id);
     const i = this.snapshot.players.findIndex((p) => p.id === id);
     if (i >= 0) this.snapshot.players.splice(i, 1);
+  }
+
+  /** Park a pot back on a free ring (or any free surface). Other items drop. */
+  private returnCookware(held: HeldItem | null): void {
+    if (!held || held.kind !== 'pot') return;
+    const tiles = this.snapshot.tiles;
+    for (const tile of tiles) {
+      if (tile.t === 'stove' && !tile.pot) {
+        tile.pot = held.pot;
+        return;
+      }
+    }
+    for (const tile of tiles) {
+      if (tile.t === 'counter' && !tile.item) {
+        tile.item = held;
+        return;
+      }
+    }
   }
 
   hasPlayer(id: string): boolean {
@@ -460,6 +491,9 @@ export class Game {
 
   private updatePots(dt: number): void {
     for (const tile of this.snapshot.tiles) {
+      // Only a ring cooks. A pot on a counter or in a chef's hands is off the
+      // heat, so its timers freeze exactly where they were.
+      if (tile.t !== 'stove') continue;
       const pot = tile.pot;
       if (!pot) continue;
       if (pot.state === 'cooking') {
@@ -485,6 +519,34 @@ export class Game {
     pot.contents = [];
     pot.cookMs = 0;
     pot.state = 'idle';
+  }
+
+  /**
+   * Put something into a pot, or take the soup out of it. Shared by stove
+   * rings and pots sitting on a counter so both read identically to a player.
+   */
+  private static usePot(
+    p: PlayerState,
+    pot: Pot,
+    held: HeldItem,
+    buzz: (ms: number) => void,
+  ): void {
+    if (held.kind === 'ingredient') {
+      if (!held.ing.chopped) return;
+      if (pot.state === 'done' || pot.state === 'burnt') return;
+      if (pot.contents.length >= POT_CAPACITY) return;
+      pot.contents.push(held.ing.type);
+      pot.state = 'cooking';
+      p.held = null;
+      buzz(BUZZ_PLACE);
+      return;
+    }
+    // Empty plate on a finished pot: scoop the soup.
+    if (held.kind !== 'plate' || held.soup !== null) return;
+    if (pot.state !== 'done') return;
+    held.soup = pot.contents.slice();
+    Game.emptyPot(pot);
+    buzz(BUZZ_PLACE);
   }
 
   // --- tiles / targeting ---------------------------------------------------
@@ -530,9 +592,17 @@ export class Game {
 
       case 'counter':
       case 'board': {
+        const item = tile.item;
+        const surfacePot = item?.kind === 'pot' ? item.pot : null;
         if (!held) {
-          const item = tile.item;
           if (!item) return;
+          // A burnt pot dumps its char before it can be carried, exactly as it
+          // does on a stove: one press to clear it, another to pick it up.
+          if (surfacePot && surfacePot.state === 'burnt') {
+            Game.emptyPot(surfacePot);
+            buzz(BUZZ_PLACE);
+            return;
+          }
           p.held = item;
           tile.item = null;
           if (tile.t === 'board') {
@@ -542,7 +612,21 @@ export class Game {
           buzz(BUZZ_PICKUP);
           return;
         }
-        if (tile.item) return;
+        // A pot on a surface works like a stove's ring, minus the heat.
+        if (surfacePot) {
+          Game.usePot(p, surfacePot, held, buzz);
+          return;
+        }
+        // Pouring a finished pot onto a waiting plate: the soup moves, the pot
+        // stays in hand.
+        if (held.kind === 'pot' && item?.kind === 'plate' && item.soup === null) {
+          if (held.pot.state !== 'done') return;
+          item.soup = held.pot.contents.slice();
+          Game.emptyPot(held.pot);
+          buzz(BUZZ_PLACE);
+          return;
+        }
+        if (item) return;
         // Boards only accept ingredients (that is all you can chop).
         if (tile.t === 'board' && held.kind !== 'ingredient') return;
         tile.item = held;
@@ -554,29 +638,26 @@ export class Game {
 
       case 'stove': {
         const pot = tile.pot;
-        if (!pot) return;
-        if (!held) {
-          if (pot.state !== 'burnt') return;
-          Game.emptyPot(pot);
-          buzz(BUZZ_PLACE);
-          return;
-        }
-        if (held.kind === 'ingredient') {
-          if (!held.ing.chopped) return;
-          if (pot.state === 'done' || pot.state === 'burnt') return;
-          if (pot.contents.length >= POT_CAPACITY) return;
-          pot.contents.push(held.ing.type);
-          pot.state = 'cooking';
+        if (!pot) {
+          // A bare ring takes nothing but a pot.
+          if (!held || held.kind !== 'pot') return;
+          tile.pot = held.pot;
           p.held = null;
           buzz(BUZZ_PLACE);
           return;
         }
-        // Empty plate on a finished pot: scoop the soup.
-        if (held.soup !== null) return;
-        if (pot.state !== 'done') return;
-        held.soup = pot.contents.slice();
-        Game.emptyPot(pot);
-        buzz(BUZZ_PLACE);
+        if (!held) {
+          if (pot.state === 'burnt') {
+            Game.emptyPot(pot);
+            buzz(BUZZ_PLACE);
+            return;
+          }
+          p.held = { kind: 'pot', pot };
+          tile.pot = null;
+          buzz(BUZZ_PICKUP);
+          return;
+        }
+        Game.usePot(p, pot, held, buzz);
         return;
       }
 
@@ -592,6 +673,13 @@ export class Game {
         if (!held) return;
         if (held.kind === 'ingredient') {
           p.held = null;
+          buzz(BUZZ_PLACE);
+          return;
+        }
+        if (held.kind === 'pot') {
+          // Pots are kitchen furniture: tip the contents out, keep the pot.
+          if (held.pot.contents.length === 0 && held.pot.state === 'idle') return;
+          Game.emptyPot(held.pot);
           buzz(BUZZ_PLACE);
           return;
         }

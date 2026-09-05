@@ -291,3 +291,218 @@ test('restoreSnapshot round-trips a mid-round kitchen', () => {
   g2.snapshot.tiles[STOVES[0]!]!.pot!.contents.push('tomato');
   assert.equal(wire.tiles[STOVES[0]!]!.pot!.contents.length, POT_CAPACITY);
 });
+
+/* --------------------------- pots as cookware --------------------------- */
+
+test('empty hands lift a pot off its ring and set it back down', () => {
+  const h = harness();
+  const stove = STOVES[0]!;
+  h.face(stove);
+  h.a();
+  const item = held(h);
+  assert.ok(item?.kind === 'pot');
+  assert.equal(h.tile(stove).pot, null, 'the ring is left bare');
+
+  h.a();
+  assert.equal(held(h), null);
+  assert.equal(h.tile(stove).pot, item.pot, 'the same pot goes back');
+});
+
+test('a pot rides to a counter and back', () => {
+  const h = harness();
+  h.face(STOVES[0]!);
+  h.a();
+  h.face(COUNTERS[0]!);
+  h.a();
+  assert.equal(held(h), null);
+  assert.equal(h.tile(COUNTERS[0]!).item?.kind, 'pot');
+
+  h.a();
+  assert.equal(held(h)?.kind, 'pot');
+  assert.equal(h.tile(COUNTERS[0]!).item, null);
+});
+
+test('boards, crates, plate stacks and the serve window refuse a pot', () => {
+  const h = harness();
+  h.face(STOVES[0]!);
+  h.a();
+  for (const idx of [BOARDS[0]!, CRATES[0]!, PLATES[0]!, SERVE[0]!]) {
+    h.face(idx);
+    h.a();
+    assert.equal(held(h)?.kind, 'pot', `tile ${idx} must not take the pot`);
+  }
+  assert.equal(h.tile(BOARDS[0]!).item, null);
+});
+
+test('a pot off the heat freezes, and resumes where it left off', () => {
+  const h = harness();
+  const stove = STOVES[0]!;
+  fillPot(h, stove);
+  h.run(COOK_MS * 0.5);
+  h.face(stove);
+  h.a();
+  const carried = held(h);
+  assert.ok(carried?.kind === 'pot');
+  // Read the clock once the pot is off the heat: the pickup tick itself still
+  // cooked, because timers run before button presses inside a tick.
+  const partway = carried.pot.cookMs;
+  assert.ok(partway > 0);
+  h.run(COOK_MS * 2);
+  assert.equal(carried.pot.cookMs, partway, 'carried pots do not cook');
+  assert.equal(carried.pot.state, 'cooking');
+
+  // Parked on a counter it stays just as frozen.
+  h.face(COUNTERS[0]!);
+  h.a();
+  h.run(COOK_MS * 2);
+  const parked = h.tile(COUNTERS[0]!).item;
+  assert.ok(parked?.kind === 'pot' && parked.pot.cookMs === partway);
+
+  h.a();
+  h.face(stove);
+  h.a();
+  h.run(COOK_MS - partway + TICK_MS);
+  assert.equal(h.tile(stove).pot!.state, 'done', 'the ring picks the timer back up');
+});
+
+test('a counter pot takes chopped ingredients and fills a plate', () => {
+  const h = harness();
+  const counter = COUNTERS[0]!;
+  h.face(STOVES[0]!);
+  h.a();
+  h.face(counter);
+  h.a();
+
+  for (let i = 0; i < POT_CAPACITY; i++) {
+    h.face(CRATES[0]!);
+    h.a();
+    h.face(BOARDS[0]!);
+    h.a();
+    h.holdB(CHOP_MS + TICK_MS * 2);
+    h.a();
+    h.face(counter);
+    h.a();
+    assert.equal(held(h), null, 'the counter pot swallowed the ingredient');
+  }
+  const item = h.tile(counter).item;
+  assert.ok(item?.kind === 'pot' && item.pot.contents.length === POT_CAPACITY);
+  assert.equal(item.pot.state, 'cooking');
+
+  // Nothing cooks off the ring, so cheat it to done and scoop it out.
+  item.pot.state = 'done';
+  item.pot.cookMs = 0;
+  h.face(PLATES[0]!);
+  h.a();
+  h.face(counter);
+  h.a();
+  const plate = held(h);
+  assert.ok(plate?.kind === 'plate' && plate.soup?.length === POT_CAPACITY);
+  assert.equal(item.pot.state, 'idle');
+  assert.equal(item.pot.contents.length, 0);
+});
+
+test('a full pot in hand refuses more and pours into a waiting plate', () => {
+  const h = harness();
+  const stove = STOVES[0]!;
+  const counter = COUNTERS[0]!;
+  fillPot(h, stove);
+  h.run(COOK_MS + TICK_MS);
+  assert.equal(h.tile(stove).pot!.state, 'done');
+
+  // Park an empty plate on a counter, then bring the pot to it.
+  h.face(PLATES[0]!);
+  h.a();
+  h.face(counter);
+  h.a();
+  h.face(stove);
+  h.a();
+  const carried = held(h);
+  assert.ok(carried?.kind === 'pot');
+
+  h.face(counter);
+  h.a();
+  const plate = h.tile(counter).item;
+  assert.ok(plate?.kind === 'plate' && plate.soup?.length === POT_CAPACITY);
+  assert.equal(carried.pot.state, 'idle');
+  assert.equal(carried.pot.contents.length, 0);
+  assert.equal(held(h), carried, 'the pot stays in your hands');
+
+  // A second pour has nothing to give, so the plate keeps its soup.
+  h.a();
+  assert.equal(plate.soup?.length, POT_CAPACITY);
+});
+
+test('trash tips a pot out and hands it straight back', () => {
+  const h = harness();
+  const stove = STOVES[0]!;
+  const pot = h.tile(stove).pot!;
+  pot.contents = ['onion', 'tomato'];
+  pot.state = 'cooking';
+  h.face(stove);
+  h.a();
+  h.face(TRASH[0]!);
+  h.a();
+  const carried = held(h);
+  assert.ok(carried?.kind === 'pot');
+  assert.equal(carried.pot.contents.length, 0);
+  assert.equal(carried.pot.state, 'idle');
+});
+
+test('a burnt pot on a counter is dumped before it can be carried', () => {
+  const h = harness();
+  const counter = COUNTERS[0]!;
+  const stove = STOVES[0]!;
+  const pot = h.tile(stove).pot!;
+  pot.contents = ['onion', 'onion', 'onion'];
+  pot.state = 'burnt';
+  h.face(stove);
+  h.a(); // burnt pot on a ring: dump first
+  assert.equal(pot.state, 'idle');
+  pot.contents = ['onion', 'onion', 'onion'];
+  pot.state = 'burnt';
+
+  // Move the (burnt) pot by hand: dump, lift, carry, and burn it on the counter.
+  h.a(); // dump
+  h.a(); // lift
+  h.face(counter);
+  h.a();
+  const item = h.tile(counter).item;
+  assert.ok(item?.kind === 'pot');
+  item.pot.contents = ['onion', 'onion', 'onion'];
+  item.pot.state = 'burnt';
+
+  h.a();
+  assert.equal(held(h), null, 'the first press only tips the char out');
+  assert.equal(item.pot.state, 'idle');
+  h.a();
+  assert.equal(held(h)?.kind, 'pot');
+});
+
+test('a chef who leaves does not take the pot with them', () => {
+  const h = harness(2);
+  h.face(STOVES[0]!, 'p1');
+  h.g.press('p1', 'a');
+  h.tick(TICK_MS);
+  assert.equal(h.snap.players.find((p) => p.id === 'p1')!.held?.kind, 'pot');
+  h.g.removePlayer('p1');
+  assert.ok(STOVES.some((i) => h.tile(i).pot), 'the pot is back on a ring');
+});
+
+test('restoreSnapshot round-trips a carried pot and a bare ring', () => {
+  const h = harness();
+  const stove = STOVES[0]!;
+  fillPot(h, stove, 'tomato', 2);
+  h.face(stove);
+  h.a();
+
+  const wire = JSON.parse(JSON.stringify(h.snap)) as Snapshot;
+  const g2 = new Game({ seed: 7 });
+  g2.restoreSnapshot(wire);
+  assert.equal(g2.snapshot.tiles[stove]!.pot, null, 'the empty ring survives');
+  const restored = g2.snapshot.players[0]!.held;
+  assert.ok(restored?.kind === 'pot');
+  assert.deepEqual(restored.pot.contents, ['tomato', 'tomato']);
+  restored.pot.contents.push('onion');
+  const source = wire.players[0]!.held;
+  assert.ok(source?.kind === 'pot' && source.pot.contents.length === 2);
+});

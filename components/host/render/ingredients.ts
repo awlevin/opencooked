@@ -2,11 +2,19 @@
 // wherever it appears — crate face, board, pot, plate, order ticket — so the
 // player can read a ticket and scan the kitchen for the same shape.
 
-import type { HeldItem, IngredientType } from '@/shared/types';
+import {
+  BURN_MS,
+  COOK_MS,
+  POT_CAPACITY,
+  type HeldItem,
+  type IngredientType,
+  type Pot,
+} from '@/shared/types';
 import {
   INGREDIENT_COLORS,
   PAL,
   circle,
+  clamp,
   ellipse,
   fillStroke,
   mix,
@@ -14,6 +22,11 @@ import {
   shade,
   tint,
 } from './theme';
+
+/** Width the pot artwork was authored at, in tile units. */
+const POT_SIZE = 0.66;
+/** Outline width for the cookware, in the pot's own authored units. */
+const POT_OUT = 0.055;
 
 /** Whole (unchopped) ingredient, centred at (x,y) with radius r. */
 function drawWhole(
@@ -212,6 +225,144 @@ export function drawPlate(
   }
 }
 
+/** The bare ring of a stove: what is left when the pot is carried away. */
+export function drawBurner(
+  c: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number,
+  time: number,
+): void {
+  const k = size / POT_SIZE;
+  c.save();
+  c.translate(x, y);
+  c.scale(k, k);
+  ellipse(c, 0, 0.02, 0.4, 0.14);
+  fillStroke(c, PAL.metalDark, PAL.ink, POT_OUT * 0.8);
+  // gas ring, breathing a little so an empty stove still feels alive
+  c.globalAlpha = 0.5 + 0.16 * Math.sin(time * 2.4);
+  circle(c, 0, 0.02, 0.24);
+  fillStroke(c, 'rgba(255,150,60,0.5)', 'rgba(255,196,110,0.8)', POT_OUT * 0.6);
+  c.globalAlpha = 1;
+  c.restore();
+}
+
+/**
+ * A cooking pot, wherever it is: on a ring, on a counter, or in two hands.
+ * `size` is the width of the body in the caller's units; everything else is
+ * proportional to it, so one routine serves every context.
+ */
+export function drawPot(
+  c: CanvasRenderingContext2D,
+  pot: Pot,
+  x: number,
+  y: number,
+  size: number,
+  time: number,
+): void {
+  const k = size / POT_SIZE;
+  const burnt = pot.state === 'burnt';
+  const done = pot.state === 'done';
+  const OUT = POT_OUT;
+
+  c.save();
+  c.translate(x, y);
+  c.scale(k, k);
+
+  if (done) {
+    const g = c.createRadialGradient(0, 0, 0.05, 0, 0, 0.66);
+    g.addColorStop(0, 'rgba(80, 235, 150, 0.6)');
+    g.addColorStop(1, 'rgba(80, 235, 150, 0)');
+    c.fillStyle = g;
+    c.fillRect(-0.7, -0.7, 1.4, 1.4);
+  }
+
+  // handles first, so the body overlaps their inner ends
+  for (const s of [-1, 1]) {
+    rr(c, s * 0.3 - (s > 0 ? 0 : 0.13), -0.04, 0.13, 0.13, 0.06);
+    fillStroke(c, PAL.metalDark, PAL.ink, OUT * 0.8);
+  }
+  // body
+  const bg = c.createLinearGradient(0, -0.22, 0, 0.3);
+  bg.addColorStop(0, burnt ? shade(PAL.potHi, 0.45) : PAL.potHi);
+  bg.addColorStop(1, burnt ? shade(PAL.pot, 0.5) : PAL.pot);
+  rr(c, -0.33, -0.19, 0.66, 0.47, 0.13);
+  fillStroke(c, bg, PAL.ink, OUT);
+  // rim
+  ellipse(c, 0, -0.19, 0.34, 0.115);
+  fillStroke(c, PAL.potRim, PAL.ink, OUT);
+
+  // contents
+  if (pot.contents.length > 0) {
+    const col = burnt ? '#241d18' : soupColor(pot.contents);
+    ellipse(c, 0, -0.19, 0.275, 0.088);
+    fillStroke(c, col, shade(col, 0.4), OUT * 0.6);
+    if (!burnt) {
+      for (let i = 0; i < pot.contents.length; i++) {
+        const a = (i / pot.contents.length) * Math.PI * 2 + time * 0.6;
+        circle(c, Math.cos(a) * 0.125, -0.19 + Math.sin(a) * 0.036, 0.04);
+        c.fillStyle = tint(INGREDIENT_COLORS[pot.contents[i]!], 0.15);
+        c.fill();
+      }
+    }
+    if (pot.state === 'cooking') {
+      // bubbling
+      for (let i = 0; i < 4; i++) {
+        const t = (time * 0.9 + i * 0.27) % 1;
+        const a = i * 1.9;
+        c.globalAlpha = 0.75 * (1 - t);
+        circle(c, Math.cos(a) * 0.15, -0.19 + Math.sin(a) * 0.045 - t * 0.07, 0.02 + t * 0.034);
+        c.fillStyle = tint(col, 0.5);
+        c.fill();
+      }
+      c.globalAlpha = 1;
+    }
+  }
+
+  // fill pips: how many of POT_CAPACITY slots are used
+  for (let i = 0; i < POT_CAPACITY; i++) {
+    const px = (i - (POT_CAPACITY - 1) / 2) * 0.15;
+    circle(c, px, 0.43, 0.048);
+    const ing = pot.contents[i];
+    fillStroke(c, ing ? INGREDIENT_COLORS[ing] : 'rgba(24,14,8,0.55)', PAL.ink, OUT * 0.65);
+  }
+
+  // state feedback
+  if (pot.state === 'cooking') {
+    const frac = clamp(pot.cookMs / COOK_MS, 0, 1);
+    c.beginPath();
+    c.arc(0, 0, 0.45, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac);
+    c.strokeStyle = PAL.amber;
+    c.lineWidth = 0.075;
+    c.lineCap = 'round';
+    c.stroke();
+    drawSteam(c, 0, -0.3, 0.15, time * 0.8, 'rgba(255,255,255,0.5)');
+  } else if (done) {
+    // the pot keeps a timer running toward burnt; accept either convention
+    // (reset-to-zero or continuing past COOK_MS).
+    const since = pot.cookMs >= COOK_MS ? pot.cookMs - COOK_MS : pot.cookMs;
+    const left = clamp(1 - since / BURN_MS, 0, 1);
+    c.beginPath();
+    c.arc(0, 0, 0.45, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * left);
+    c.strokeStyle = left > 0.35 ? '#4ce08c' : PAL.tomato;
+    c.lineWidth = 0.075;
+    c.lineCap = 'round';
+    c.stroke();
+    drawSteam(c, 0, -0.32, 0.18, time, 'rgba(190,255,215,0.85)');
+  } else if (burnt) {
+    for (let i = 0; i < 4; i++) {
+      const t = (time * 0.42 + i * 0.25) % 1;
+      c.globalAlpha = 0.62 * (1 - t);
+      circle(c, Math.sin((t + i) * 4.1) * 0.14, -0.26 - t * 0.55, 0.06 + t * 0.14);
+      c.fillStyle = '#1b1512';
+      c.fill();
+    }
+    c.globalAlpha = 1;
+  }
+
+  c.restore();
+}
+
 /** Anything a chef or a counter can be holding. */
 export function drawHeldItem(
   c: CanvasRenderingContext2D,
@@ -219,9 +370,20 @@ export function drawHeldItem(
   x: number,
   y: number,
   r: number,
+  time = 0,
 ): void {
-  if (item.kind === 'plate') drawPlate(c, x, y, r, item.soup);
-  else drawIngredient(c, item.ing, x, y, r * 0.86);
+  switch (item.kind) {
+    case 'plate':
+      drawPlate(c, x, y, r, item.soup);
+      return;
+    case 'ingredient':
+      drawIngredient(c, item.ing, x, y, r * 0.86);
+      return;
+    case 'pot':
+      // A pot is bigger than a plate and sits a touch lower in the hands.
+      drawPot(c, item.pot, x, y + r * 0.12, r * 2.1, time);
+      return;
+  }
 }
 
 /** Rising wisps. `phase` is a free-running time in seconds. */

@@ -16,7 +16,10 @@ export interface Ingredient {
 export type HeldItem =
   | { kind: 'ingredient'; ing: Ingredient }
   // soup: null = empty plate; array = cooked soup contents on the plate
-  | { kind: 'plate'; soup: IngredientType[] | null };
+  | { kind: 'plate'; soup: IngredientType[] | null }
+  // A pot off its ring. Its timers only run while it sits on a stove, so a
+  // carried pot is frozen wherever its cooking got to.
+  | { kind: 'pot'; pot: Pot };
 
 export type TileType =
   | 'floor'
@@ -41,7 +44,9 @@ export interface Tile {
   crate?: IngredientType; // only for t='crate'
   item?: HeldItem | null; // surface item, only counter/board can hold one
   chopMs?: number; // chop progress 0..CHOP_MS, only board with unchopped ingredient
-  pot?: Pot; // only for t='stove'
+  // Only for t='stove'. null = a bare ring: someone carried the pot away.
+  // A pot on a counter is an ordinary `item` ({kind:'pot'}) instead.
+  pot?: Pot | null;
 }
 
 export interface PlayerState {

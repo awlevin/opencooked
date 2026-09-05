@@ -225,6 +225,18 @@ function sameRecipe(a: readonly IngredientType[], b: readonly IngredientType[]):
 
 const tileAt = (s: Snapshot, i: number): Tile | undefined => s.tiles[i];
 
+/** One-word shorthand for what a chef is carrying (tuning logs only). */
+function describeHeld(item: HeldItem): string {
+  switch (item.kind) {
+    case 'plate':
+      return item.soup ? 'soup' : 'plate';
+    case 'pot':
+      return `pot:${item.pot.state}`;
+    case 'ingredient':
+      return `${item.ing.type}${item.ing.chopped ? '*' : ''}`;
+  }
+}
+
 function isIngredient(item: HeldItem | null | undefined, type?: IngredientType, chopped?: boolean): boolean {
   if (!item || item.kind !== 'ingredient') return false;
   if (type !== undefined && item.ing.type !== type) return false;
@@ -513,13 +525,7 @@ export class BotTeam {
     return this.bots
       .map((b) => {
         const me = snap.players.find((p) => p.id === b.id);
-        const held = me?.held
-          ? me.held.kind === 'plate'
-            ? me.held.soup
-              ? 'soup'
-              : 'plate'
-            : `${me.held.ing.type}${me.held.ing.chopped ? '*' : ''}`
-          : '-';
+        const held = me?.held ? describeHeld(me.held) : '-';
         const pos = me ? `${me.pos.x.toFixed(1)},${me.pos.y.toFixed(1)}` : '?';
         return `${b.name}[${b.label}|${held}|${pos}|${b.step?.k ?? '-'}]`;
       })
@@ -729,6 +735,15 @@ export class BotTeam {
           return this.stashTask(bot, park);
         }
         return null;
+      }
+
+      // Bots never reach for cookware on purpose, but a resumed round can hand
+      // one a pot. Put it back on a free ring before doing anything else.
+      if (held.kind === 'pot') {
+        const ring = STOVES.find((s) => !tileAt(snap, s.idx)?.pot);
+        if (!ring) return null;
+        bot.label = 'pot back';
+        return this.potBackTask(ring);
       }
 
       // ingredient
@@ -988,6 +1003,17 @@ export class BotTeam {
   }
 
   /** Empty a burnt pot. */
+  /** Hang a pot back on the first free ring. */
+  private *potBackTask(ring: Access): Task {
+    yield { k: 'goto', tile: ring.stand, timeoutMs: 9000 };
+    yield {
+      k: 'useA',
+      at: ring,
+      done: (c) => c.me.held === null,
+      timeoutMs: 4000,
+    };
+  }
+
   private *dumpTask(stove: Access): Task {
     yield { k: 'goto', tile: stove.stand, timeoutMs: 9000 };
     yield {
