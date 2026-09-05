@@ -39,6 +39,8 @@
     "game",
     "realtime",
     "shared",
+    "next.config.ts",
+    "server/lan.ts",
     "server/local.ts",
     "scripts",
     ".next/types/**/*.ts",

@@ -10,7 +10,6 @@
 
 import { createServer } from 'node:http';
 import type { IncomingMessage } from 'node:http';
-import { networkInterfaces } from 'node:os';
 import type { Duplex } from 'node:stream';
 
 import next from 'next';
@@ -19,26 +18,11 @@ import { WebSocketServer } from 'ws';
 import { LOCAL_PORT, WS_PATH } from '../shared/protocol';
 import { MAX_PAYLOAD_BYTES, PING_MS } from '../realtime/config';
 import { attachWebSocket, getManager } from '../realtime';
+import { lanIp } from './lan';
 
 const dev = process.env.NODE_ENV !== 'production';
 /** LOCAL_PORT is the contract; PORT only exists so tests can take a spare. */
 const port = Number(process.env.PORT) || LOCAL_PORT;
-
-/** LAN address for the QR join URL: prefer en0, then any external IPv4. */
-function lanIp(): string {
-  const nets = networkInterfaces();
-  const isV4 = (family: string): boolean => family === 'IPv4' || family === '4';
-
-  for (const addr of nets['en0'] ?? []) {
-    if (isV4(String(addr.family)) && !addr.internal) return addr.address;
-  }
-  for (const addrs of Object.values(nets)) {
-    for (const addr of addrs ?? []) {
-      if (isV4(String(addr.family)) && !addr.internal) return addr.address;
-    }
-  }
-  return 'localhost';
-}
 
 function pathOf(req: IncomingMessage): string {
   const raw = req.url ?? '/';
@@ -50,14 +34,18 @@ function pathOf(req: IncomingMessage): string {
 // 'upgrade' listener to whatever server it can reach (`options.httpServer`, or
 // `req.socket.server`). That listener answers /api/ws too, and ends the socket
 // right after our handshake — the client sees a 1006 before the first frame.
-// Handing Next a decoy server parks that listener somewhere harmless; we still
-// drive Next's HMR upgrades ourselves through `getUpgradeHandler()` below.
-const decoyForNextsUpgradeListener = createServer();
-const app = next({ dev, httpServer: decoyForNextsUpgradeListener });
+// Handing Next a side server parks that listener off ours, and gives us a door
+// to call it through on the upgrades it does own (see below).
+//
+// That listener is the only usable one: in a custom server
+// `app.getUpgradeHandler()` resolves to NextNodeServer.handleUpgrade, which is
+// an empty function. It answers nothing, and in Next 16 dev the initial RSC
+// payload streams over the /_next/hmr socket — so an unanswered upgrade there
+// leaves every page stuck on its SSR markup, hydrated by nothing.
+const nextUpgrades = createServer();
+const app = next({ dev, httpServer: nextUpgrades, port });
 await app.prepare();
 const handle = app.getRequestHandler();
-// Only valid after prepare(); Next serves its own HMR socket through it.
-const upgrade = app.getUpgradeHandler();
 
 const server = createServer((req, res) => {
   void handle(req, res);
@@ -72,9 +60,11 @@ server.on('upgrade', (req, socket: Duplex, head) => {
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
     return;
   }
-  // Next owns its own HMR socket in dev; everything else is not welcome.
-  if (path.startsWith('/_next')) {
-    void upgrade(req, socket, head);
+  // Next owns its own sockets in dev — HMR, and with it the RSC stream the
+  // page hydrates from. Its listener is on `nextUpgrades` by now: the page
+  // load that hands the browser this URL goes through `handle` first.
+  if (path.startsWith('/_next') && nextUpgrades.listenerCount('upgrade') > 0) {
+    nextUpgrades.emit('upgrade', req, socket, head);
     return;
   }
   socket.destroy();
