@@ -62,8 +62,16 @@ game-server agent — walkable floor in the middle, stations around the edges
 and on a center island so players have to route around each other).
 
 **Stations**: ingredient crates (onion/tomato/mushroom), cutting boards,
-stoves with fixed pots, plate stack, serve window, trash, plain counters
-(can hold one item).
+stoves with a pot on the ring, plate stack, serve window, trash, plain
+counters (can hold one item), and one wall bracket holding the kitchen's
+only fire extinguisher.
+
+**Pots** are carryable. A pot lifted off a ring leaves a bare burner and
+becomes a held item; it can be set on any stove ring or empty counter, and
+it works the same wherever it is — ingredients go in, a plate scoops the
+soup out. Only a pot **on a ring** cooks: off the heat every timer freezes
+where it was. Boards, crates, the plate stack and the serve window all
+refuse a pot.
 
 **Flow**: grab raw ingredient from crate → chop on board (hold B, 1.5 s) →
 drop 3 chopped ingredients into a pot → cooks 8 s → done (burns 10 s later
@@ -93,19 +101,37 @@ step in front of the player (round(pos + dir)).
 | nothing | crate | pick raw ingredient |
 | nothing | counter/board with item | pick it up (aborts chop progress) |
 | nothing | plates | pick empty plate |
-| nothing | stove w/ burnt pot | dump pot → idle empty |
+| nothing | pot (ring or counter), burnt | dump the char → idle empty |
+| nothing | pot (ring or counter), any other state | pick the pot up (a ring is left bare) |
 | ingredient | empty counter/board | place it |
-| chopped ingredient | stove, pot not full, not done/burnt | add to pot (pot starts/keeps cooking; if it was `done` you can't add) |
-| any item | trash | ingredient: discard; plate: empty its soup, keep plate |
-| empty plate | stove w/ done pot | fill plate with soup, pot → idle empty |
+| chopped ingredient | pot not full, not done/burnt | add to pot (pot starts/keeps cooking; if it was `done` you can't add) |
+| any item | trash | ingredient: discard; plate: empty its soup, keep plate; pot: tip it out, keep the pot; extinguisher: refused |
+| empty plate | done pot (ring or counter) | fill plate with soup, pot → idle empty |
+| pot | empty stove ring | set it down (timers resume) |
+| pot | empty counter | set it down |
+| pot (done) | counter holding an empty plate | pour the soup onto the plate, keep the pot |
 | soup plate | serve | deliver (scoring above) |
+| nothing | stocked extinguisher bracket | take the extinguisher |
+| extinguisher | empty bracket / empty counter | put it down |
 
-**Button B**: facing a board holding an unchopped ingredient → chop while
+A burning tile refuses every A press. Put the fire out first.
+
+**Button B**: holding the extinguisher → spray while held down (server sets
+`spraying`); a burning tile in front takes `EXTINGUISH_MS` of foam and goes
+out. Otherwise, facing a board holding an unchopped ingredient → chop while
 held down (server sets `chopping`, accumulates `chopMs`). Otherwise → dash
-(150 ms at 8 tiles/s, 500 ms cooldown).
+(150 ms at 8 tiles/s, 500 ms cooldown). Two chefs working one board, or one
+fire, is never a speedup.
+
+**Fire**: a pot left `burnt` on a lit ring catches after `FIRE_MS`, and a
+burning tile sets one random non-floor neighbour alight every
+`FIRE_SPREAD_MS`. Igniting a tile ruins any food on it; pots and the
+extinguisher survive (a pot goes `burnt`). Fire never spreads to the serve
+window or the extinguisher bracket, and never goes out on its own — it is a
+time sink, not a fail state, and the only answer is the extinguisher.
 
 **Buzz**: send `{t:'buzz'}` to a controller on successful pickup/place/
-serve/chop-complete so phones vibrate.
+serve/chop-complete/fire-out so phones vibrate.
 
 ## Quality bar
 
