@@ -1,11 +1,12 @@
 // Full-screen kitchen renderer: devicePixelRatio-aware, letterboxed so tiles
 // stay square, redrawing every animation frame from interpolated snapshots.
 
+import { themeOf } from '@/shared/levels';
 import type { SnapshotBuffer } from '../state';
 import { drawHud } from './hud';
 import { drawPlayer, drawPlayerLabel } from './players';
 import { drawKitchen } from './tiles';
-import { PAL, rr, text } from './theme';
+import { rr, text } from './theme';
 
 export class GameView {
   private readonly c: CanvasRenderingContext2D;
@@ -72,17 +73,21 @@ export class GameView {
 
     c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
 
+    const frame = this.buf.sample(nowMs);
+    // One resolve per frame: every draw call below is handed the world's
+    // colours, so none of them has to know which world it is drawing.
+    const theme = themeOf(frame?.snap.worldId ?? '');
+
     // backdrop
     const bg = c.createLinearGradient(0, 0, 0, H);
-    bg.addColorStop(0, '#39200f');
-    bg.addColorStop(1, '#1c110a');
+    bg.addColorStop(0, theme.backdropTop);
+    bg.addColorStop(1, theme.backdropBottom);
     c.fillStyle = bg;
     c.fillRect(0, 0, W, H);
 
     const u = Math.min(W / 1920, H / 1080);
     const hudH = 158 * u;
 
-    const frame = this.buf.sample(nowMs);
     if (!frame) {
       text(c, 'Warming up the kitchen…', W / 2, H / 2, {
         size: Math.max(20, 46 * u),
@@ -108,7 +113,7 @@ export class GameView {
     c.shadowBlur = 40 * u;
     c.shadowOffsetY = 14 * u;
     rr(c, bx, by, bw, bh, 22 * u);
-    c.fillStyle = PAL.floorA;
+    c.fillStyle = theme.floorA;
     c.fill();
     c.restore();
 
@@ -116,7 +121,7 @@ export class GameView {
     rr(c, bx, by, bw, bh, 22 * u);
     c.clip();
     c.translate(bx, by);
-    drawKitchen(c, snap, T, time);
+    drawKitchen(c, snap, T, time, theme);
 
     if (this.debug) {
       c.strokeStyle = 'rgba(255,255,255,0.16)';
@@ -153,10 +158,10 @@ export class GameView {
     c.restore();
 
     rr(c, bx, by, bw, bh, 22 * u);
-    c.strokeStyle = PAL.ink;
+    c.strokeStyle = theme.frame;
     c.lineWidth = Math.max(3, 9 * u);
     c.stroke();
 
-    drawHud(c, { W, H, u, hudH }, snap, Math.max(0, snap.msLeft - age), age, time);
+    drawHud(c, { W, H, u, hudH }, snap, Math.max(0, snap.msLeft - age), age, time, theme);
   }
 }

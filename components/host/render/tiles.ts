@@ -3,6 +3,7 @@
 // so line widths and radii are expressed as fractions of a tile.
 
 import { rawIngredient, type IngredientType } from '@/shared/catalogue';
+import type { WorldTheme } from '@/shared/levels';
 import {
   CHOP_MS,
   EXTINGUISH_MS,
@@ -17,66 +18,54 @@ import {
   drawPlate,
   drawVessel,
 } from './ingredients';
+import { drawMotifFloor } from './motifs';
 import { PAL, circle, clamp, fillStroke, rr, shade } from './theme';
 
 const OUT = 0.055; // outline width, tile units
 
-/** Warm plank floor covering the whole grid (board-local pixels). */
+/** The floor of one kitchen, in that world's colours (board-local pixels). */
 export function drawFloor(
   c: CanvasRenderingContext2D,
   w: number,
   h: number,
   T: number,
+  theme: WorldTheme,
+  time: number,
 ): void {
   const W = w * T;
   const H = h * T;
-  const plank = T * 0.62;
-  const rows = Math.ceil(H / plank);
-  for (let i = 0; i < rows; i++) {
-    const y = i * plank;
-    c.fillStyle = i % 2 === 0 ? PAL.floorA : PAL.floorB;
-    c.fillRect(0, y, W, Math.min(plank, H - y));
-    // seam under each plank
-    c.fillStyle = PAL.floorSeam;
-    c.fillRect(0, y + plank - T * 0.035, W, T * 0.035);
-    // staggered butt joints
-    const off = (i % 3) * T * 1.1;
-    for (let x = off; x < W; x += T * 3.4) {
-      c.fillRect(x, y, T * 0.035, Math.min(plank, H - y));
-    }
-    // grain
-    c.strokeStyle = PAL.floorGrain;
-    c.lineWidth = T * 0.018;
-    c.beginPath();
-    c.moveTo(0, y + plank * 0.34);
-    for (let x = 0; x <= W; x += T * 0.5) {
-      c.lineTo(x, y + plank * 0.34 + Math.sin((x / T + i) * 1.7) * T * 0.02);
-    }
-    c.stroke();
-  }
+  drawMotifFloor(c, theme, W, H, T, time);
   // inner shading so the room feels like a room
   const vg = c.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.2, W / 2, H / 2, Math.max(W, H) * 0.75);
   vg.addColorStop(0, 'rgba(0,0,0,0)');
-  vg.addColorStop(1, 'rgba(40,20,8,0.42)');
+  vg.addColorStop(1, theme.vignette);
   c.fillStyle = vg;
   c.fillRect(0, 0, W, H);
 }
 
-function slab(c: CanvasRenderingContext2D, top: string, bottom: string): void {
+/** The counter slab every station stands on, in the world's counter colours. */
+function slab(c: CanvasRenderingContext2D, theme: WorldTheme): void {
   rr(c, 0.02, 0.1, 0.96, 0.9, 0.16);
-  c.fillStyle = PAL.shadow;
+  c.fillStyle = theme.shadow;
   c.fill();
   const g = c.createLinearGradient(0, 0.02, 0, 0.94);
-  g.addColorStop(0, top);
-  g.addColorStop(1, bottom);
+  g.addColorStop(0, theme.counterTop);
+  g.addColorStop(1, theme.counterBottom);
   rr(c, 0.02, 0.02, 0.96, 0.9, 0.16);
-  fillStroke(c, g, PAL.ink, OUT);
+  fillStroke(c, g, theme.ink, OUT);
   rr(c, 0.12, 0.09, 0.76, 0.14, 0.07);
-  c.fillStyle = 'rgba(255,255,255,0.45)';
+  c.fillStyle = 'rgba(255,255,255,0.28)';
   c.fill();
 }
 
-function drawKnife(c: CanvasRenderingContext2D, x: number, y: number, s: number, a: number): void {
+function drawKnife(
+  c: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  s: number,
+  a: number,
+  ink: string,
+): void {
   c.save();
   c.translate(x, y);
   c.rotate(a);
@@ -86,9 +75,9 @@ function drawKnife(c: CanvasRenderingContext2D, x: number, y: number, s: number,
   c.lineTo(s * 0.32, s * 0.1);
   c.lineTo(-s * 0.9, s * 0.14);
   c.closePath();
-  fillStroke(c, '#dfe6ee', PAL.ink, OUT * 0.9);
+  fillStroke(c, '#dfe6ee', ink, OUT * 0.9);
   rr(c, s * 0.3, -s * 0.16, s * 0.62, s * 0.3, s * 0.12);
-  fillStroke(c, '#3f2a1c', PAL.ink, OUT * 0.9);
+  fillStroke(c, '#3f2a1c', ink, OUT * 0.9);
   c.restore();
 }
 
@@ -100,9 +89,10 @@ function progressBar(
   h: number,
   frac: number,
   fill: string,
+  ink: string,
 ): void {
   rr(c, x, y, w, h, h / 2);
-  fillStroke(c, 'rgba(60,38,20,0.55)', PAL.ink, OUT * 0.7);
+  fillStroke(c, 'rgba(60,38,20,0.55)', ink, OUT * 0.7);
   const fw = Math.max(0, Math.min(1, frac)) * (w - h * 0.3);
   if (fw > 0.001) {
     rr(c, x + h * 0.15, y + h * 0.16, Math.max(fw, h * 0.7), h * 0.68, h * 0.34);
@@ -111,15 +101,15 @@ function progressBar(
   }
 }
 
-function drawCrate(c: CanvasRenderingContext2D, kind: IngredientType): void {
+function drawCrate(c: CanvasRenderingContext2D, kind: IngredientType, theme: WorldTheme): void {
   rr(c, 0.02, 0.12, 0.96, 0.9, 0.14);
-  c.fillStyle = PAL.shadow;
+  c.fillStyle = theme.shadow;
   c.fill();
   const g = c.createLinearGradient(0, 0, 0, 1);
   g.addColorStop(0, PAL.crate);
   g.addColorStop(1, shade(PAL.crateDark, 0.18));
   rr(c, 0.02, 0.04, 0.96, 0.9, 0.12);
-  fillStroke(c, g, PAL.ink, OUT);
+  fillStroke(c, g, theme.ink, OUT);
   // slats: light planks top and bottom, dark grooves between
   c.fillStyle = 'rgba(255, 226, 178, 0.3)';
   for (const y of [0.08, 0.74]) {
@@ -141,8 +131,8 @@ function drawCrate(c: CanvasRenderingContext2D, kind: IngredientType): void {
   drawHeldItem(c, { kind: 'ingredient', ing: rawIngredient(kind) }, 0.5, 0.48, 0.33);
 }
 
-function drawBoard(c: CanvasRenderingContext2D, tile: Tile): void {
-  slab(c, PAL.counterHi, PAL.counterEdge);
+function drawBoard(c: CanvasRenderingContext2D, tile: Tile, theme: WorldTheme): void {
+  slab(c, theme);
   rr(c, 0.11, 0.2, 0.78, 0.6, 0.09);
   fillStroke(c, PAL.board, PAL.boardEdge, OUT * 0.9);
   c.strokeStyle = 'rgba(120,80,40,0.28)';
@@ -158,39 +148,39 @@ function drawBoard(c: CanvasRenderingContext2D, tile: Tile): void {
   const chopping = (tile.chopMs ?? 0) > 0;
   // The board's resting knife is the "this is a board" cue; while a chef is
   // chopping, their own animated knife takes over so we hide this one.
-  if (!chopping) drawKnife(c, 0.75, 0.3, 0.24, -0.55);
+  if (!chopping) drawKnife(c, 0.75, 0.3, 0.24, -0.55, theme.ink);
 
   if (item) drawHeldItem(c, item, 0.45, 0.46, 0.26);
 
   if (chopping) {
-    progressBar(c, 0.15, 0.66, 0.7, 0.16, (tile.chopMs ?? 0) / CHOP_MS, PAL.mint);
+    progressBar(c, 0.15, 0.66, 0.7, 0.16, (tile.chopMs ?? 0) / CHOP_MS, PAL.mint, theme.ink);
   }
 }
 
-function drawPlates(c: CanvasRenderingContext2D): void {
-  slab(c, PAL.counterHi, PAL.counterEdge);
+function drawPlates(c: CanvasRenderingContext2D, theme: WorldTheme): void {
+  slab(c, theme);
   for (let i = 3; i >= 0; i--) {
     drawPlate(c, 0.5, 0.62 - i * 0.075, 0.3, null);
   }
 }
 
-function drawServe(c: CanvasRenderingContext2D, time: number): void {
+function drawServe(c: CanvasRenderingContext2D, time: number, theme: WorldTheme): void {
   rr(c, 0.02, 0.1, 0.96, 0.9, 0.16);
-  c.fillStyle = PAL.shadow;
+  c.fillStyle = theme.shadow;
   c.fill();
   rr(c, 0.02, 0.02, 0.96, 0.9, 0.16);
-  fillStroke(c, PAL.metal, PAL.ink, OUT);
+  fillStroke(c, PAL.metal, theme.ink, OUT);
 
   // the hatch opening, warm light spilling out
   const g = c.createLinearGradient(0, 0.12, 0, 0.72);
   g.addColorStop(0, '#2a1b12');
   g.addColorStop(1, '#ffca6a');
   rr(c, 0.14, 0.14, 0.72, 0.56, 0.08);
-  fillStroke(c, g, PAL.ink, OUT * 0.9);
+  fillStroke(c, g, theme.ink, OUT * 0.9);
 
   // rolled shutter
   rr(c, 0.12, 0.06, 0.76, 0.2, 0.07);
-  fillStroke(c, PAL.metalHi, PAL.ink, OUT * 0.9);
+  fillStroke(c, PAL.metalHi, theme.ink, OUT * 0.9);
   c.strokeStyle = 'rgba(40,26,16,0.45)';
   c.lineWidth = OUT * 0.5;
   c.beginPath();
@@ -217,12 +207,12 @@ function drawServe(c: CanvasRenderingContext2D, time: number): void {
 
   // service lip
   rr(c, 0.04, 0.68, 0.92, 0.24, 0.08);
-  fillStroke(c, PAL.counter, PAL.ink, OUT);
+  fillStroke(c, theme.counterFace, theme.ink, OUT);
 }
 
-function drawTrash(c: CanvasRenderingContext2D): void {
+function drawTrash(c: CanvasRenderingContext2D, theme: WorldTheme): void {
   rr(c, 0.08, 0.2, 0.84, 0.82, 0.16);
-  c.fillStyle = PAL.shadow;
+  c.fillStyle = theme.shadow;
   c.fill();
   // tapered body
   c.beginPath();
@@ -235,7 +225,7 @@ function drawTrash(c: CanvasRenderingContext2D): void {
   g.addColorStop(0, PAL.binDark);
   g.addColorStop(0.45, PAL.bin);
   g.addColorStop(1, PAL.binDark);
-  fillStroke(c, g, PAL.ink, OUT);
+  fillStroke(c, g, theme.ink, OUT);
   c.strokeStyle = 'rgba(20,30,24,0.4)';
   c.lineWidth = OUT * 0.7;
   c.beginPath();
@@ -246,17 +236,22 @@ function drawTrash(c: CanvasRenderingContext2D): void {
   c.stroke();
   // lid
   rr(c, 0.1, 0.14, 0.8, 0.16, 0.08);
-  fillStroke(c, PAL.binLid, PAL.ink, OUT);
+  fillStroke(c, PAL.binLid, theme.ink, OUT);
   rr(c, 0.42, 0.05, 0.16, 0.1, 0.05);
-  fillStroke(c, PAL.binLid, PAL.ink, OUT * 0.9);
+  fillStroke(c, PAL.binLid, theme.ink, OUT * 0.9);
 }
 
 /** Wall bracket for the one extinguisher in the kitchen. */
-function drawExtinguisherMount(c: CanvasRenderingContext2D, tile: Tile, time: number): void {
-  slab(c, PAL.counterHi, PAL.counterEdge);
+function drawExtinguisherMount(
+  c: CanvasRenderingContext2D,
+  tile: Tile,
+  time: number,
+  theme: WorldTheme,
+): void {
+  slab(c, theme);
   // red backing plate, so an empty bracket still shouts "this is where it goes"
   rr(c, 0.2, 0.14, 0.6, 0.74, 0.1);
-  fillStroke(c, '#9c2b20', PAL.ink, OUT * 0.9);
+  fillStroke(c, '#9c2b20', theme.ink, OUT * 0.9);
   rr(c, 0.26, 0.2, 0.48, 0.62, 0.07);
   fillStroke(c, 'rgba(255, 226, 178, 0.18)', null, 0);
 
@@ -281,7 +276,7 @@ function drawExtinguisherMount(c: CanvasRenderingContext2D, tile: Tile, time: nu
     c.lineTo(0.72, y);
     c.stroke();
   }
-  c.strokeStyle = PAL.ink;
+  c.strokeStyle = theme.ink;
   c.lineWidth = 0.022;
   for (const y of [0.36, 0.68]) {
     c.beginPath();
@@ -363,17 +358,18 @@ export function drawFire(
   c.restore();
 }
 
-/** One station tile, drawn into the unit box. */
+/** One station tile, drawn into the unit box, in this world's colours. */
 export function drawTile(
   c: CanvasRenderingContext2D,
   tile: Tile,
   time: number,
+  theme: WorldTheme,
 ): void {
   switch (tile.t) {
     case 'floor':
       return;
     case 'counter': {
-      slab(c, PAL.counterHi, PAL.counterEdge);
+      slab(c, theme);
       const item = tile.item;
       // A pot parked on a counter is drawn at cookware scale, not item scale,
       // and without the cooking dial: nothing cooks off the ring.
@@ -382,28 +378,29 @@ export function drawTile(
       return;
     }
     case 'crate':
-      drawCrate(c, tile.crate ?? 'onion');
+      drawCrate(c, tile.crate ?? 'onion', theme);
       return;
     case 'board':
-      drawBoard(c, tile);
+      drawBoard(c, tile, theme);
       return;
     case 'stove':
-      slab(c, PAL.metalHi, PAL.metalDark);
+      // A range is a range in every world: steel, not cabinetry.
+      slab(c, { ...theme, counterTop: PAL.metalHi, counterBottom: PAL.metalDark });
       // The ring is always there; the pot may have been carried off.
       drawBurner(c, 0.5, 0.5, 0.66, time);
       if (tile.pot) drawVessel(c, tile.pot, 0.5, 0.5, 0.66, time);
       return;
     case 'plates':
-      drawPlates(c);
+      drawPlates(c, theme);
       return;
     case 'serve':
-      drawServe(c, time);
+      drawServe(c, time, theme);
       return;
     case 'trash':
-      drawTrash(c);
+      drawTrash(c, theme);
       return;
     case 'extinguisher':
-      drawExtinguisherMount(c, tile, time);
+      drawExtinguisherMount(c, tile, time, theme);
       return;
   }
 }
@@ -414,8 +411,9 @@ export function drawKitchen(
   snap: Snapshot,
   T: number,
   time: number,
+  theme: WorldTheme,
 ): void {
-  drawFloor(c, snap.w, snap.h, T);
+  drawFloor(c, snap.w, snap.h, T, theme, time);
   for (let y = 0; y < snap.h; y++) {
     for (let x = 0; x < snap.w; x++) {
       const tile = snap.tiles[y * snap.w + x];
@@ -423,7 +421,7 @@ export function drawKitchen(
       c.save();
       c.translate(x * T, y * T);
       c.scale(T, T);
-      drawTile(c, tile, time);
+      drawTile(c, tile, time, theme);
       // Flames sit on top of whatever is burning.
       if (tile.fire) drawFire(c, tile.fire, 0.5, 0.5, 1, time);
       c.restore();

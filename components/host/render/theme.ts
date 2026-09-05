@@ -1,21 +1,20 @@
-// Shared art direction: palette, drawing primitives, easing helpers.
-// Everything is drawn with paths — no images, no external assets.
+// Shared art direction: the world-independent palette, drawing primitives,
+// easing helpers. Everything is drawn with paths — no images, no assets.
+//
+// What is NOT in here is the world's palette. Floors, counters, the backdrop
+// and the HUD band come from the level's `WorldTheme` (shared/levels), which
+// the renderer resolves once per frame and passes down. Keeping the two apart
+// is the whole trick behind three worlds sharing one set of draw calls: a
+// function that takes its colours as an argument cannot be tied to a world,
+// and an onion has to be the same onion in all of them.
 
 import { INGREDIENTS, type IngredientType } from '@/shared/catalogue';
 
+/** Colours that belong to the food, the cookware and the chefs — never to a world. */
 export const PAL = {
   ink: '#3b2314',
   inkSoft: '#6b4526',
   shadow: 'rgba(28, 16, 9, 0.42)',
-
-  floorA: '#c98a4b',
-  floorB: '#bd7d40',
-  floorSeam: '#9c6432',
-  floorGrain: 'rgba(94, 56, 24, 0.20)',
-
-  counter: '#fff2d8',
-  counterEdge: '#d9ab6f',
-  counterHi: '#fffaf0',
 
   crate: '#b9793d',
   crateSlat: '#cf8f4f',
@@ -46,9 +45,6 @@ export const PAL = {
   mint: '#2ec4a0',
   green: '#3fbf6f',
   amber: '#f2a13c',
-
-  hudBg: 'rgba(38, 22, 13, 0.94)',
-  hudEdge: '#ffd23f',
 } as const;
 
 /**

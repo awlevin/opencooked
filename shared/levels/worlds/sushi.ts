@@ -79,7 +79,6 @@ export const SUSHI: WorldDef = {
         '#..#I#V#H#L#..#',
         '#.@.........@.#',
         '#..@.......@..#',
-        '#.............#',
         '#X##P###E###W##',
       ],
       menu: ['nigiri', 'maki', 'veggie-roll'],

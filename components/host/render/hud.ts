@@ -2,6 +2,7 @@
 // Sized off `u` (1 = a 1920x1080 screen) so text stays couch-legible.
 
 import { DISHES } from '@/shared/catalogue';
+import type { WorldTheme } from '@/shared/levels';
 import type { Order, Snapshot } from '@/shared/types';
 import { drawTicketIcon } from './ingredients';
 import { PAL, clamp, fillStroke, font, rr, text } from './theme';
@@ -62,6 +63,39 @@ function widthOf(
   const w = c.measureText(s).width;
   c.restore();
   return w;
+}
+
+/**
+ * Break a dish name into at most two lines that fit `maxW`. The split point is
+ * the word boundary that leaves the two halves closest in width, so "DOUBLE
+ * ONION & TOMATO" reads as two balanced lines rather than one long and one
+ * short. A single word that does not fit stays one line and is scaled down.
+ */
+function wrapLabel(
+  c: CanvasRenderingContext2D,
+  label: string,
+  maxW: number,
+  size: number,
+  tracking: number,
+): string[] {
+  if (widthOf(c, label, size, 800, tracking) <= maxW) return [label];
+  const words = label.split(' ');
+  if (words.length < 2) return [label];
+  let best: [string, string] | null = null;
+  let bestScore = Infinity;
+  for (let i = 1; i < words.length; i++) {
+    const a = words.slice(0, i).join(' ');
+    const b = words.slice(i).join(' ');
+    const wa = widthOf(c, a, size, 800, tracking);
+    const wb = widthOf(c, b, size, 800, tracking);
+    // Prefer a split where both halves fit; otherwise the most even one.
+    const score = Math.max(wa, wb) + Math.abs(wa - wb) * 0.5;
+    if (score < bestScore) {
+      bestScore = score;
+      best = [a, b];
+    }
+  }
+  return best ? [best[0], best[1]] : [label];
 }
 
 /** Small tracked caption. `x` is the left edge (or centre when centred). */
@@ -163,34 +197,46 @@ function drawTicket(
     Math.max(2, u * 4),
   );
 
-  // the dish, named across the top of the ticket
-  rr(c, u * 7, u * 6, w - u * 14, u * 27, u * 8);
-  c.fillStyle = 'rgba(107, 69, 38, 0.16)';
-  c.fill();
+  // The dish, named across the top of the ticket. A two-word name gets two
+  // lines rather than being squeezed to nothing — "DOUBLE ONION & TOMATO" on
+  // one line is a grey smear at couch distance.
   const dish = DISHES[order.dish];
   const label = (dish?.name ?? '').toUpperCase();
   const maxW = w - u * 20;
-  // Shrink long names to fit rather than clipping them: a ticket you cannot
-  // read is worse than a ticket in slightly smaller type.
-  let nameSize = u * 21;
   const track = u * 1.5;
-  const measured = widthOf(c, label, nameSize, 800, track);
-  if (measured > maxW) nameSize *= maxW / measured;
-  text(c, label, w / 2, inkY(c, label, nameSize, u * 19.5), {
-    size: nameSize,
-    weight: 800,
-    fill: 'rgba(59, 35, 20, 0.9)',
-    baseline: 'alphabetic',
-    letterSpacing: track,
-  });
+  const baseSize = u * 21;
+  const lines = wrapLabel(c, label, maxW, baseSize, track);
+  const lineH = u * 20;
+  const headH = u * 12 + lineH * lines.length;
+
+  rr(c, u * 7, u * 6, w - u * 14, headH, u * 8);
+  c.fillStyle = 'rgba(107, 69, 38, 0.16)';
+  c.fill();
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    // Shrink whatever still does not fit rather than clipping it.
+    let size = baseSize;
+    const measured = widthOf(c, line, size, 800, track);
+    if (measured > maxW) size *= maxW / measured;
+    const cy = u * 6 + u * 6 + lineH * (i + 0.5);
+    text(c, line, w / 2, inkY(c, line, size, cy), {
+      size,
+      weight: 800,
+      fill: 'rgba(59, 35, 20, 0.9)',
+      baseline: 'alphabetic',
+      letterSpacing: track,
+    });
+  }
 
   const n = Math.max(1, order.recipe.length);
-  const iconR = Math.min(u * 20, (w - u * 18) / (n * 2.25));
+  const barTop = h - u * 13 - u * 10;
+  const iconCy = (u * 6 + headH + barTop) / 2;
+  const iconR = Math.min(u * 20, (barTop - headH - u * 12) / 2, (w - u * 18) / (n * 2.25));
   const step = (w - u * 16) / n;
   for (let i = 0; i < n; i++) {
     const ing = order.recipe[i];
     if (!ing) continue;
-    drawTicketIcon(c, ing, u * 8 + step * (i + 0.5), h * 0.56, iconR);
+    drawTicketIcon(c, ing, u * 8 + step * (i + 0.5), iconCy, iconR);
   }
 
   // draining time bar
@@ -220,15 +266,16 @@ export function drawHud(
   msLeft: number,
   age: number,
   time: number,
+  theme: WorldTheme,
 ): void {
   const { W, u, hudH } = L;
 
-  // band
+  // band, in the world's own dark and its own accent rule
   c.save();
   rr(c, -u * 30, -u * 60, W + u * 60, hudH + u * 60, u * 26);
-  c.fillStyle = PAL.hudBg;
+  c.fillStyle = theme.hudBg;
   c.fill();
-  c.fillStyle = PAL.hudEdge;
+  c.fillStyle = theme.hudEdge;
   c.fillRect(0, hudH - u * 6, W, u * 6);
   c.restore();
 
@@ -245,7 +292,7 @@ export function drawHud(
   caption(c, 'SCORE', sx, capCy, u);
 
   // A five-point star's ink sits above its centre; nudge it back onto the axis.
-  star(c, sx + starR, numCy + starR * 0.096, starR, PAL.butter);
+  star(c, sx + starR, numCy + starR * 0.096, starR, theme.accent);
   // The minus lives in a reserved gutter, so `-29` and `29` put their first
   // digit — and therefore the star — in exactly the same place.
   const minusW = widthOf(c, '-', figSize);
@@ -304,7 +351,7 @@ export function drawHud(
   fillStroke(
     c,
     low ? `rgba(120, 22, 14, ${0.75 + pulse * 0.25})` : 'rgba(255,246,227,0.10)',
-    low ? PAL.tomato : 'rgba(255,246,227,0.24)',
+    low ? PAL.tomato : theme.accent,
     u * 4,
   );
   caption(c, 'TIME', 0, -u * 33.5, u, low ? 'rgba(255,220,212,0.82)' : CAP_FILL, 'center');
@@ -320,7 +367,7 @@ export function drawHud(
 
   // --- order tickets ---
   const tkW = u * 150;
-  const tkH = u * 118;
+  const tkH = u * 126;
   const gap = u * 14;
   const right = W - u * 36;
   const top = (hudH - u * 6 - tkH) / 2;
