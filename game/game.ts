@@ -7,6 +7,7 @@
 import type { Btn } from '../shared/protocol';
 import { createLevel } from '../shared/levels';
 import type {
+  Fire,
   HeldItem,
   IngredientType,
   Order,
@@ -25,6 +26,9 @@ import {
   DASH_MS,
   DASH_SPEED,
   EXPIRE_PENALTY,
+  EXTINGUISH_MS,
+  FIRE_MS,
+  FIRE_SPREAD_MS,
   MAX_ORDERS,
   ORDER_MS,
   ORDER_SPAWN_MS,
@@ -45,6 +49,7 @@ export interface BuzzEvent {
 const BUZZ_PICKUP = 25;
 const BUZZ_PLACE = 30;
 const BUZZ_CHOP_DONE = 70;
+const BUZZ_FIRE_OUT = 90;
 const BUZZ_SERVE = 150;
 
 /** Longest dt a single tick may integrate, so a stalled loop cannot teleport. */
@@ -113,6 +118,8 @@ function cloneItem(item: HeldItem | null | undefined): HeldItem | null {
       return { kind: 'plate', soup: item.soup ? [...item.soup] : null };
     case 'pot':
       return { kind: 'pot', pot: clonePot(item.pot) };
+    case 'extinguisher':
+      return { kind: 'extinguisher' };
   }
 }
 
@@ -124,6 +131,7 @@ function cloneTile(tile: Tile): Tile {
   // `null` is meaningful on a stove (a ring whose pot was carried off), so the
   // key survives the round trip even when there is no pot.
   if (tile.pot !== undefined) out.pot = tile.pot ? clonePot(tile.pot) : null;
+  if (tile.fire) out.fire = { ms: num(tile.fire.ms), sprayMs: num(tile.fire.sprayMs) };
   return out;
 }
 
@@ -139,6 +147,7 @@ function clonePlayer(p: PlayerState): PlayerState {
     dir: facing,
     held: cloneItem(p.held),
     chopping: false,
+    spraying: false,
     dashMsLeft: 0,
   };
 }
@@ -221,6 +230,7 @@ export class Game {
       rt.s.dir = { x: 0, y: 1 };
       rt.s.held = null;
       rt.s.chopping = false;
+      rt.s.spraying = false;
       rt.s.dashMsLeft = 0;
       rt.move = { x: 0, y: 0 };
       rt.aPresses = 0;
@@ -300,6 +310,7 @@ export class Game {
       dir: { x: 0, y: 1 },
       held: null,
       chopping: false,
+      spraying: false,
       dashMsLeft: 0,
     };
     this.rts.set(id, {
@@ -326,18 +337,28 @@ export class Game {
     if (i >= 0) this.snapshot.players.splice(i, 1);
   }
 
-  /** Park a pot back on a free ring (or any free surface). Other items drop. */
+  /**
+   * Put the kitchen's own equipment back: a pot on a free ring, the
+   * extinguisher on its bracket, either of them on a counter as a fallback.
+   * Ingredients and plates are replaceable, so those just go with the chef.
+   */
   private returnCookware(held: HeldItem | null): void {
-    if (!held || held.kind !== 'pot') return;
+    if (!held || (held.kind !== 'pot' && held.kind !== 'extinguisher')) return;
     const tiles = this.snapshot.tiles;
+    const home = held.kind === 'pot' ? 'stove' : 'extinguisher';
     for (const tile of tiles) {
-      if (tile.t === 'stove' && !tile.pot) {
+      if (tile.t !== home || tile.fire) continue;
+      if (held.kind === 'pot') {
+        if (tile.pot) continue;
         tile.pot = held.pot;
-        return;
+      } else {
+        if (tile.item) continue;
+        tile.item = held;
       }
+      return;
     }
     for (const tile of tiles) {
-      if (tile.t === 'counter' && !tile.item) {
+      if (tile.t === 'counter' && !tile.item && !tile.fire) {
         tile.item = held;
         return;
       }
@@ -418,6 +439,7 @@ export class Game {
     s.msLeft = Math.max(0, s.msLeft - dt);
     this.updateOrders(dt);
     this.updatePots(dt);
+    this.updateFires(dt);
 
     // Facing follows the last nonzero stick direction.
     for (const rt of this.rts.values()) {
@@ -439,6 +461,7 @@ export class Game {
     }
 
     this.updateChopping(dt, events);
+    this.updateSpraying(dt, events);
     this.moveAndCollide(dt);
 
     if (s.msLeft <= 0) s.phase = 'gameover';
@@ -490,7 +513,9 @@ export class Game {
   // --- pots ----------------------------------------------------------------
 
   private updatePots(dt: number): void {
-    for (const tile of this.snapshot.tiles) {
+    const tiles = this.snapshot.tiles;
+    for (let i = 0; i < tiles.length; i++) {
+      const tile = tiles[i]!;
       // Only a ring cooks. A pot on a counter or in a chef's hands is off the
       // heat, so its timers freeze exactly where they were.
       if (tile.t !== 'stove') continue;
@@ -511,8 +536,74 @@ export class Game {
           pot.state = 'burnt';
           pot.cookMs = 0;
         }
+      } else if (pot.state === 'burnt' && !tile.fire) {
+        // Char left over a lit ring eventually catches. Carry the pot off (or
+        // dump it) and the clock stops with it.
+        pot.cookMs += dt;
+        if (pot.cookMs >= FIRE_MS) {
+          pot.cookMs = 0;
+          this.ignite(tile);
+        }
       }
     }
+  }
+
+  // --- fire ----------------------------------------------------------------
+
+  /**
+   * Set a tile alight. Pots and the extinguisher survive the flames — the
+   * round has exactly as many of them as it started with — but a pot's
+   * contents are ruined. Anything else on the tile is gone.
+   */
+  private ignite(tile: Tile): void {
+    if (tile.t === 'floor' || tile.fire) return;
+    tile.fire = { ms: 0, sprayMs: 0 };
+    const item = tile.item;
+    const pot = tile.t === 'stove' ? tile.pot : item?.kind === 'pot' ? item.pot : null;
+    if (pot) {
+      pot.state = 'burnt';
+      pot.cookMs = 0;
+    } else if (item && item.kind !== 'extinguisher') {
+      tile.item = null;
+    }
+    if (tile.t === 'board') tile.chopMs = 0;
+  }
+
+  private updateFires(dt: number): void {
+    const tiles = this.snapshot.tiles;
+    // Take the burning set first: a tile lit this tick does not spread yet.
+    const burning: number[] = [];
+    for (let i = 0; i < tiles.length; i++) if (tiles[i]!.fire) burning.push(i);
+    for (const i of burning) {
+      const fire = tiles[i]!.fire as Fire;
+      const before = Math.floor(fire.ms / FIRE_SPREAD_MS);
+      fire.ms += dt;
+      const after = Math.floor(fire.ms / FIRE_SPREAD_MS);
+      for (let n = before; n < after; n++) this.spreadFrom(i);
+    }
+  }
+
+  /** Light one random neighbour of a burning tile. */
+  private spreadFrom(from: number): void {
+    const s = this.snapshot;
+    const x = from % s.w;
+    const y = Math.floor(from / s.w);
+    const options: Tile[] = [];
+    for (const d of [
+      { x: 1, y: 0 },
+      { x: -1, y: 0 },
+      { x: 0, y: 1 },
+      { x: 0, y: -1 },
+    ]) {
+      const tile = this.tileAt(x + d.x, y + d.y);
+      if (!tile || tile.fire || tile.t === 'floor') continue;
+      // The serve window and the extinguisher bracket never burn: losing
+      // either one would leave the round with no way out of the fire.
+      if (tile.t === 'serve' || tile.t === 'extinguisher') continue;
+      options.push(tile);
+    }
+    if (options.length === 0) return;
+    this.ignite(options[Math.floor(this.rand() * options.length)]!);
   }
 
   private static emptyPot(pot: Pot): void {
@@ -574,6 +665,8 @@ export class Game {
     if (!tile) return;
     const held = p.held;
     const buzz = (ms: number) => events.push({ playerId: p.id, buzzMs: ms });
+    // You cannot take from or put onto a fire. Put it out first.
+    if (tile.fire) return;
 
     switch (tile.t) {
       case 'crate': {
@@ -683,8 +776,26 @@ export class Game {
           buzz(BUZZ_PLACE);
           return;
         }
+        if (held.kind !== 'plate') return; // the extinguisher is not rubbish
         if (held.soup === null) return; // clean plate: nothing to bin
         held.soup = null;
+        buzz(BUZZ_PLACE);
+        return;
+      }
+
+      case 'extinguisher': {
+        if (!held) {
+          const mounted = tile.item;
+          if (mounted?.kind !== 'extinguisher') return;
+          p.held = mounted;
+          tile.item = null;
+          buzz(BUZZ_PICKUP);
+          return;
+        }
+        // The bracket takes back exactly one thing.
+        if (held.kind !== 'extinguisher' || tile.item) return;
+        tile.item = held;
+        p.held = null;
         buzz(BUZZ_PLACE);
         return;
       }
@@ -710,15 +821,19 @@ export class Game {
 
   /** Index of the board this player could chop on right now, else null. */
   private chopTargetIndex(p: PlayerState): number | null {
+    if (p.held?.kind === 'extinguisher') return null; // that hand is busy
     const ti = this.targetIndex(p);
     const tile = this.snapshot.tiles[ti];
-    if (!tile || tile.t !== 'board') return null;
+    if (!tile || tile.t !== 'board' || tile.fire) return null;
     const item = tile.item;
     if (!item || item.kind !== 'ingredient' || item.ing.chopped) return null;
     return ti;
   }
 
   private actionB(rt: Runtime): void {
+    // Holding the extinguisher, B is the trigger and nothing else: dashing
+    // away mid-spray would be the opposite of what the button is for.
+    if (rt.s.held?.kind === 'extinguisher') return;
     // Facing a choppable board => chop (handled while held). Otherwise dash.
     if (this.chopTargetIndex(rt.s) !== null) return;
     if (rt.s.dashMsLeft > 0 || rt.dashCooldownMs > 0) return;
@@ -765,6 +880,35 @@ export class Game {
             other.s.chopping = false;
             events.push({ playerId: other.s.id, buzzMs: BUZZ_CHOP_DONE });
           }
+        }
+      }
+    }
+  }
+
+  /**
+   * The extinguisher, held down. Foam always sprays (a dead trigger reads as
+   * a broken button); a fire in front of it goes out after EXTINGUISH_MS.
+   * Two chefs on one fire is not a speedup, exactly as with chopping.
+   */
+  private updateSpraying(dt: number, events: BuzzEvent[]): void {
+    const advanced = new Set<number>();
+    for (const rt of this.rts.values()) {
+      const p = rt.s;
+      if (!rt.bDown || p.held?.kind !== 'extinguisher') {
+        p.spraying = false;
+        continue;
+      }
+      p.spraying = true;
+      const ti = this.targetIndex(p);
+      const tile = this.snapshot.tiles[ti];
+      if (!tile?.fire || advanced.has(ti)) continue;
+      advanced.add(ti);
+      tile.fire.sprayMs += dt;
+      if (tile.fire.sprayMs < EXTINGUISH_MS) continue;
+      delete tile.fire;
+      for (const other of this.rts.values()) {
+        if (other.s.spraying && this.targetIndex(other.s) === ti) {
+          events.push({ playerId: other.s.id, buzzMs: BUZZ_FIRE_OUT });
         }
       }
     }

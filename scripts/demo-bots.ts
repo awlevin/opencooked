@@ -190,6 +190,7 @@ const STOVES: Access[] = stationsOfType('stove')
   .filter((a): a is Access => a !== null);
 const PLATES: Access = accessOf(stationsOfType('plates')[0])!;
 const SERVE: Access = accessOf(stationsOfType('serve')[0])!;
+const EXT_MOUNT: Access | null = accessOf(stationsOfType('extinguisher')[0] ?? { x: 0, y: 0 });
 
 /**
  * Counters we park chopped ingredients on while waiting for the next order,
@@ -232,6 +233,8 @@ function describeHeld(item: HeldItem): string {
       return item.soup ? 'soup' : 'plate';
     case 'pot':
       return `pot:${item.pot.state}`;
+    case 'extinguisher':
+      return 'ext';
     case 'ingredient':
       return `${item.ing.type}${item.ing.chopped ? '*' : ''}`;
   }
@@ -737,6 +740,18 @@ export class BotTeam {
         return null;
       }
 
+      // Fire beats every other job in the kitchen.
+      if (held.kind === 'extinguisher') {
+        const fire = this.nearestFire(snap, me.pos);
+        if (fire) {
+          bot.label = 'fire';
+          return this.sprayTask(fire);
+        }
+        if (!EXT_MOUNT) return null;
+        bot.label = 'stow';
+        return this.stowTask(EXT_MOUNT);
+      }
+
       // Bots never reach for cookware on purpose, but a resumed round can hand
       // one a pot. Put it back on a free ring before doing anything else.
       if (held.kind === 'pot') {
@@ -778,6 +793,16 @@ export class BotTeam {
     bot.reserve = null;
     bot.stageTarget = null;
     bot.prepType = null;
+
+    // 0. something is alight: fetch the extinguisher and put it out.
+    const fire = this.nearestFire(snap, me.pos);
+    if (fire && !this.someoneHasExtinguisher(snap)) {
+      const grab = this.extinguisherAccess(snap);
+      if (grab) {
+        bot.label = 'fire';
+        return this.fireTask(grab, fire);
+      }
+    }
 
     // 1. a burnt pot blocks a stove: dump it.
     for (const stove of STOVES) {
@@ -1003,6 +1028,73 @@ export class BotTeam {
   }
 
   /** Empty a burnt pot. */
+  /* -------------------------------- fire --------------------------------- */
+
+  /** Access to the burning tile closest to `from`, if anything is alight. */
+  private nearestFire(snap: Snapshot, from: Vec2): Access | null {
+    let best: Access | null = null;
+    let bestD = Infinity;
+    snap.tiles.forEach((tile, i) => {
+      if (!tile.fire) return;
+      const a = accessOf(xyOf(i));
+      if (!a) return;
+      const d = walkDist(tileOf(from), a.stand);
+      if (d < bestD) {
+        bestD = d;
+        best = a;
+      }
+    });
+    return best;
+  }
+
+  /** Where the extinguisher is right now: its bracket, or whatever counter. */
+  private extinguisherAccess(snap: Snapshot): Access | null {
+    for (let i = 0; i < snap.tiles.length; i++) {
+      const tile = snap.tiles[i]!;
+      if (tile.fire || tile.item?.kind !== 'extinguisher') continue;
+      const a = accessOf(xyOf(i));
+      if (a) return a;
+    }
+    return null;
+  }
+
+  /** True while any chef is already carrying it — one firefighter is enough. */
+  private someoneHasExtinguisher(snap: Snapshot): boolean {
+    return snap.players.some((p) => p.held?.kind === 'extinguisher');
+  }
+
+  private *fireTask(grab: Access, fire: Access): Task {
+    yield { k: 'goto', tile: grab.stand, timeoutMs: 12000 };
+    yield {
+      k: 'useA',
+      at: grab,
+      done: (c) => c.me.held?.kind === 'extinguisher',
+      timeoutMs: 5000,
+    };
+    yield* this.sprayTask(fire);
+  }
+
+  private *sprayTask(fire: Access): Task {
+    yield { k: 'goto', tile: fire.stand, timeoutMs: 12000 };
+    yield {
+      k: 'useB',
+      at: fire,
+      done: (c) => !tileAt(c.snap, fire.idx)?.fire,
+      timeoutMs: 9000,
+    };
+  }
+
+  /** Hang the extinguisher back on its bracket. */
+  private *stowTask(mount: Access): Task {
+    yield { k: 'goto', tile: mount.stand, timeoutMs: 12000 };
+    yield {
+      k: 'useA',
+      at: mount,
+      done: (c) => c.me.held === null,
+      timeoutMs: 5000,
+    };
+  }
+
   /** Hang a pot back on the first free ring. */
   private *potBackTask(ring: Access): Task {
     yield { k: 'goto', tile: ring.stand, timeoutMs: 9000 };

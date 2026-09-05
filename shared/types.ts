@@ -19,7 +19,8 @@ export type HeldItem =
   | { kind: 'plate'; soup: IngredientType[] | null }
   // A pot off its ring. Its timers only run while it sits on a stove, so a
   // carried pot is frozen wherever its cooking got to.
-  | { kind: 'pot'; pot: Pot };
+  | { kind: 'pot'; pot: Pot }
+  | { kind: 'extinguisher' };
 
 export type TileType =
   | 'floor'
@@ -29,7 +30,8 @@ export type TileType =
   | 'stove' // holds a fixed pot (see Tile.pot)
   | 'plates' // infinite stack of clean plates
   | 'serve' // delivery window
-  | 'trash';
+  | 'trash'
+  | 'extinguisher'; // wall bracket, holds the one extinguisher (see Tile.item)
 
 export type PotState = 'idle' | 'cooking' | 'done' | 'burnt';
 
@@ -37,6 +39,12 @@ export interface Pot {
   contents: IngredientType[]; // chopped ingredients, max POT_CAPACITY
   cookMs: number; // elapsed cooking (or burning) time
   state: PotState;
+}
+
+/** A tile that is alight. Fire is put out by spraying, never by itself. */
+export interface Fire {
+  ms: number; // time since ignition; drives the spread clock and the flicker
+  sprayMs: number; // foam landed on this tile so far, 0..EXTINGUISH_MS
 }
 
 export interface Tile {
@@ -47,6 +55,7 @@ export interface Tile {
   // Only for t='stove'. null = a bare ring: someone carried the pot away.
   // A pot on a counter is an ordinary `item` ({kind:'pot'}) instead.
   pot?: Pot | null;
+  fire?: Fire; // present only while this tile is burning (never on floor)
 }
 
 export interface PlayerState {
@@ -57,6 +66,7 @@ export interface PlayerState {
   dir: Vec2; // unit facing vector
   held: HeldItem | null;
   chopping: boolean; // true while actively chopping (renderer animates)
+  spraying: boolean; // true while the extinguisher trigger is held
   dashMsLeft: number; // >0 while dashing
 }
 
@@ -95,6 +105,9 @@ export const CHOP_MS = 1500;
 export const COOK_MS = 8000; // full pot -> done
 export const BURN_MS = 10000; // time after 'done' before 'burnt'
 export const POT_CAPACITY = 3;
+export const FIRE_MS = 8000; // a burnt pot left on its ring this long ignites
+export const FIRE_SPREAD_MS = 12_000; // a burning tile lights a neighbour this often
+export const EXTINGUISH_MS = 1200; // foam needed to put one tile out
 export const ROUND_MS = 180_000;
 export const ORDER_MS = 60_000; // order lifetime
 export const ORDER_SPAWN_MS = 15_000; // new order cadence (also 1 at start)

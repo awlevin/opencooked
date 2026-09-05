@@ -21,12 +21,13 @@ export interface Level {
  *   .  floor           #  plain counter
  *   O  onion crate     T  tomato crate     M  mushroom crate
  *   B  cutting board   S  stove (pot)      P  plate stack
- *   W  serve window    X  trash
+ *   W  serve window    X  trash            E  extinguisher mount
  *
  * 13 x 8. Solid stations form the outer wall; a 5x2 island of counters and
  * two boards sits in the middle so players must route around each other.
  * Crates north-west, stoves north-east, plates + serve south-east, trash
- * south-west: every station is a different trip.
+ * south-west: every station is a different trip. The lone fire extinguisher
+ * hangs on the south wall, a whole room away from the stoves that need it.
  */
 const KITCHEN_ROWS = [
   '#OTM#####S#S#',
@@ -36,7 +37,7 @@ const KITCHEN_ROWS = [
   '#...###B#...#',
   '#...........#',
   '#...........P',
-  '#X#########W#',
+  '#X######E##W#',
 ] as const;
 
 /** Floor tiles players are placed on at the start of a round / on join. */
@@ -71,6 +72,8 @@ function tileFromChar(ch: string): Tile {
       return { t: 'serve' };
     case 'X':
       return { t: 'trash' };
+    case 'E':
+      return { t: 'extinguisher', item: { kind: 'extinguisher' } };
     case 'O':
     case 'T':
     case 'M':

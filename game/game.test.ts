@@ -14,6 +14,9 @@ import {
   BURN_MS,
   CHOP_MS,
   COOK_MS,
+  EXTINGUISH_MS,
+  FIRE_MS,
+  FIRE_SPREAD_MS,
   POT_CAPACITY,
   TICK_MS,
 } from '../shared/types';
@@ -130,6 +133,31 @@ const COUNTERS = indicesOf('counter').filter((i) => {
     return false;
   }
 });
+
+/**
+ * Stand on the diagonal neighbour of a station and lean into it. Two chefs
+ * cannot share one access tile — they push each other off it — so this is how
+ * a test gets both of them working the same station.
+ */
+function faceCorner(h: Harness, idx: number, id: string): void {
+  const p = h.snap.players.find((q) => q.id === id)!;
+  const s = xyOf(idx);
+  for (const d of [
+    { x: 1, y: 1 },
+    { x: -1, y: 1 },
+    { x: 1, y: -1 },
+    { x: -1, y: -1 },
+  ]) {
+    const sx = s.x + d.x;
+    const sy = s.y + d.y;
+    if (sx < 0 || sy < 0 || sx >= LEVEL.w || sy >= LEVEL.h) continue;
+    if (LEVEL.tiles[sy * LEVEL.w + sx]!.t !== 'floor') continue;
+    p.pos = { x: sx, y: sy };
+    p.dir = { x: -d.x / Math.SQRT2, y: -d.y / Math.SQRT2 };
+    return;
+  }
+  throw new Error(`no diagonal access to tile ${idx}`);
+}
 
 const held = (h: Harness, id = 'p0') => h.snap.players.find((p) => p.id === id)!.held;
 
@@ -505,4 +533,250 @@ test('restoreSnapshot round-trips a carried pot and a bare ring', () => {
   restored.pot.contents.push('onion');
   const source = wire.players[0]!.held;
   assert.ok(source?.kind === 'pot' && source.pot.contents.length === 2);
+});
+
+/* ---------------------------- fire and foam ----------------------------- */
+
+const MOUNT = indicesOf('extinguisher')[0]!;
+
+/**
+ * Light a tile outright. Ignition is private to the sim (only a ruined pot or
+ * a spreading fire may start one), so a test that needs a fire on a specific
+ * tile reaches in for it.
+ */
+const igniteTile = (h: Harness, idx: number): void =>
+  (h.g as unknown as { ignite(tile: Tile): void }).ignite(h.tile(idx));
+
+/** Leave a burnt pot on a ring and wait for it to catch. */
+function ignite(h: Harness, stove: number): void {
+  const pot = h.tile(stove).pot!;
+  pot.contents = ['onion', 'onion', 'onion'];
+  pot.state = 'burnt';
+  pot.cookMs = 0;
+  h.run(FIRE_MS + TICK_MS);
+}
+
+test('the level hangs exactly one extinguisher on the wall', () => {
+  const h = harness();
+  assert.equal(indicesOf('extinguisher').length, 1);
+  assert.equal(h.tile(MOUNT).item?.kind, 'extinguisher');
+});
+
+test('a burnt pot on its ring catches fire, and not a moment early', () => {
+  const h = harness();
+  const stove = STOVES[0]!;
+  const pot = h.tile(stove).pot!;
+  pot.contents = ['onion', 'onion', 'onion'];
+  pot.state = 'burnt';
+  pot.cookMs = 0;
+  h.run(FIRE_MS * 0.8);
+  assert.equal(h.tile(stove).fire, undefined);
+  h.run(FIRE_MS * 0.3);
+  assert.deepEqual(h.tile(stove).fire, { ms: h.tile(stove).fire!.ms, sprayMs: 0 });
+  assert.ok(h.tile(stove).fire!.ms >= 0);
+});
+
+test('a burnt pot off the heat never catches', () => {
+  const h = harness();
+  const stove = STOVES[0]!;
+  const pot = h.tile(stove).pot!;
+  pot.contents = ['onion'];
+  pot.state = 'burnt';
+  // Carry the char around: the ignition clock is the ring's, not the pot's.
+  h.face(stove);
+  h.a(); // dumps the char
+  h.a(); // lifts the clean pot
+  const carried = held(h);
+  assert.ok(carried?.kind === 'pot');
+  carried.pot.state = 'burnt';
+  carried.pot.contents = ['onion'];
+  h.run(FIRE_MS * 3);
+  assert.equal(h.snap.tiles.filter((t) => t.fire).length, 0);
+});
+
+test('fire spreads to one neighbour per FIRE_SPREAD_MS, sparing the way out', () => {
+  const h = harness();
+  ignite(h, STOVES[0]!);
+  assert.equal(h.snap.tiles.filter((t) => t.fire).length, 1);
+  h.run(FIRE_SPREAD_MS + TICK_MS);
+  assert.equal(h.snap.tiles.filter((t) => t.fire).length, 2);
+  h.run(FIRE_SPREAD_MS);
+  assert.ok(h.snap.tiles.filter((t) => t.fire).length >= 3);
+  for (const tile of h.snap.tiles) {
+    if (!tile.fire) continue;
+    assert.notEqual(tile.t, 'floor');
+    assert.notEqual(tile.t, 'serve');
+    assert.notEqual(tile.t, 'extinguisher');
+  }
+});
+
+test('catching fire ruins food but never the equipment', () => {
+  const h = harness();
+  const counter = COUNTERS[0]!;
+  const plateCounter = COUNTERS[1]!;
+  // A pot with soup and a plate, side by side, both set alight.
+  h.face(STOVES[0]!);
+  h.a();
+  h.face(counter);
+  h.a();
+  const potItem = h.tile(counter).item;
+  assert.ok(potItem?.kind === 'pot');
+  potItem.pot.contents = ['onion', 'tomato'];
+  potItem.pot.state = 'cooking';
+  h.face(PLATES[0]!);
+  h.a();
+  h.face(plateCounter);
+  h.a();
+
+  igniteTile(h, counter);
+  igniteTile(h, plateCounter);
+  assert.equal(potItem.pot.state, 'burnt', 'the pot survives, its soup does not');
+  assert.deepEqual(potItem.pot.contents, ['onion', 'tomato']);
+  assert.equal(h.tile(counter).item, potItem);
+  assert.equal(h.tile(plateCounter).item, null, 'the plate is gone');
+});
+
+test('a burning tile refuses every A press', () => {
+  const h = harness();
+  const stove = STOVES[0]!;
+  ignite(h, stove);
+  h.face(stove);
+  h.a();
+  assert.equal(held(h), null, 'no grabbing out of a fire');
+  assert.ok(h.tile(stove).pot, 'and nothing is dumped either');
+
+  h.face(CRATES[0]!);
+  h.a();
+  h.face(stove);
+  h.a();
+  assert.equal(held(h)?.kind, 'ingredient', 'and nothing goes in');
+});
+
+test('the extinguisher comes off its bracket and goes back on', () => {
+  const h = harness();
+  h.face(MOUNT);
+  h.a();
+  assert.equal(held(h)?.kind, 'extinguisher');
+  assert.equal(h.tile(MOUNT).item, null);
+
+  h.face(COUNTERS[0]!);
+  h.a();
+  assert.equal(h.tile(COUNTERS[0]!).item?.kind, 'extinguisher');
+  h.a();
+  h.face(TRASH[0]!);
+  h.a();
+  assert.equal(held(h)?.kind, 'extinguisher', 'the bin will not take it');
+  h.face(MOUNT);
+  h.a();
+  assert.equal(held(h), null);
+  assert.equal(h.tile(MOUNT).item?.kind, 'extinguisher');
+});
+
+test('B sprays instead of dashing while the extinguisher is in hand', () => {
+  const h = harness();
+  h.face(MOUNT);
+  h.a();
+  h.face(COUNTERS[0]!);
+  h.g.press('p0', 'b');
+  h.run(200);
+  const p = h.snap.players[0]!;
+  assert.equal(p.spraying, true, 'the trigger always makes foam');
+  assert.equal(p.dashMsLeft, 0, 'and never a dash');
+  h.g.release('p0', 'b');
+  h.tick(TICK_MS);
+  assert.equal(h.snap.players[0]!.spraying, false);
+});
+
+test('foam puts a fire out, and two chefs are not faster than one', () => {
+  const h = harness(2);
+  const stove = STOVES[0]!;
+  ignite(h, stove);
+  h.face(MOUNT);
+  h.a();
+  h.face(stove);
+  faceCorner(h, stove, 'p1');
+  // The kitchen only has one extinguisher, so hand the second chef a spare to
+  // prove the rule: foam from two nozzles is still one fire's worth per tick.
+  h.snap.players[1]!.held = { kind: 'extinguisher' };
+
+  h.g.press('p0', 'b');
+  h.g.press('p1', 'b');
+  h.run(EXTINGUISH_MS * 0.6);
+  assert.ok(h.tile(stove).fire, 'a second chef is not a speedup');
+  assert.equal(h.snap.players[1]!.spraying, true, 'though both are spraying');
+  h.run(EXTINGUISH_MS * 0.5);
+  assert.equal(h.tile(stove).fire, undefined);
+
+  // The pot is still ruined; dumping it is the usual chore.
+  h.g.release('p0', 'b');
+  h.g.release('p1', 'b');
+  h.face(COUNTERS[0]!);
+  h.a();
+  assert.equal(held(h), null);
+  h.face(stove);
+  assert.equal(h.tile(stove).pot!.state, 'burnt');
+  h.a();
+  assert.equal(h.tile(stove).pot!.state, 'idle');
+});
+
+test('putting a fire out buzzes everyone who was spraying it', () => {
+  const h = harness();
+  const stove = STOVES[0]!;
+  ignite(h, stove);
+  h.face(MOUNT);
+  h.a();
+  h.face(stove);
+  h.g.press('p0', 'b');
+  let buzzed = 0;
+  for (let t = 0; t < EXTINGUISH_MS + TICK_MS * 2; t += TICK_MS) {
+    buzzed += h.g.tick(TICK_MS).length;
+  }
+  assert.equal(buzzed, 1);
+});
+
+test('a burning board cannot be chopped on', () => {
+  const h = harness();
+  const board = BOARDS[0]!;
+  h.face(CRATES[0]!);
+  h.a();
+  h.face(board);
+  h.a();
+  igniteTile(h, board);
+  assert.equal(h.tile(board).item, null, 'the ingredient burned up');
+  h.holdB(CHOP_MS);
+  assert.equal(h.snap.players[0]!.chopping, false);
+});
+
+test('restoreSnapshot round-trips fire and the extinguisher', () => {
+  const h = harness();
+  const stove = STOVES[0]!;
+  ignite(h, stove);
+  h.face(MOUNT);
+  h.a();
+  h.face(stove); // mid-spray: the restored chef must still be aimed at the fire
+  h.tile(stove).fire!.sprayMs = 400;
+
+  const wire = JSON.parse(JSON.stringify(h.snap)) as Snapshot;
+  const g2 = new Game({ seed: 7 });
+  g2.restoreSnapshot(wire);
+  assert.deepEqual(g2.snapshot.tiles[stove]!.fire, h.tile(stove).fire);
+  assert.equal(g2.snapshot.tiles[MOUNT]!.item, null);
+  assert.equal(g2.snapshot.players[0]!.held?.kind, 'extinguisher');
+  assert.equal(g2.snapshot.players[0]!.spraying, false);
+
+  // A restored fire keeps burning and can still be put out.
+  g2.snapshot.tiles[stove]!.fire!.sprayMs = EXTINGUISH_MS - 10;
+  g2.press('p0', 'b');
+  g2.tick(TICK_MS);
+  assert.equal(g2.snapshot.tiles[stove]!.fire, undefined);
+});
+
+test('a chef who leaves hangs the extinguisher back up', () => {
+  const h = harness(2);
+  h.face(MOUNT, 'p1');
+  h.g.press('p1', 'a');
+  h.tick(TICK_MS);
+  assert.equal(h.snap.players.find((p) => p.id === 'p1')!.held?.kind, 'extinguisher');
+  h.g.removePlayer('p1');
+  assert.equal(h.tile(MOUNT).item?.kind, 'extinguisher');
 });
