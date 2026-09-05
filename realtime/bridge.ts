@@ -26,6 +26,7 @@
 
 import type { RoomRecord } from './store';
 import type { Snapshot } from '../shared/types';
+import { DEFAULT_LEVEL_ID, isLevelId } from '../shared/levels';
 import { allChannel, inChannel, outChannel } from './store';
 
 export type BusEnv =
@@ -93,5 +94,8 @@ export function asRoomRecord(code: string, v: RoomRecord): RoomRecord | null {
     if (typeof seat.playerId !== 'string' || typeof seat.token !== 'string') return null;
     if (typeof seat.name !== 'string' || typeof seat.color !== 'string') return null;
   }
-  return { ...v, code };
+  // A record from an older build (or a tab that has been open across a
+  // deploy) may name no level at all; it plays the default one.
+  const levelId = isLevelId(v.levelId) ? v.levelId : DEFAULT_LEVEL_ID;
+  return { ...v, code, levelId };
 }

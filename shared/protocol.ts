@@ -29,9 +29,13 @@ export type C2S =
   | { t: 'press'; btn: Btn }
   | { t: 'release'; btn: Btn }
   // Any controller may start the round from the lobby, or restart from
-  // the gameover screen.
+  // the gameover screen. `again` may name the level to go back to the
+  // lobby on, which is how the phone's "Next level" button works.
   | { t: 'start' }
-  | { t: 'again' }
+  | { t: 'again'; levelId?: string }
+  // Any controller may pick the kitchen, from the lobby only. Unknown ids
+  // are ignored. See shared/levels for what an id may be.
+  | { t: 'select'; levelId: string }
   // --- local mode ---
   // WebRTC handshake, relayed verbatim by the server, which never parses
   // `data` (SDP offer/answer or an ICE candidate). `to` is a playerId when
@@ -50,8 +54,10 @@ export type S2C =
   // To host, immediately after hello-host. resumed=true means the room
   // (and any in-flight round) was restored rather than freshly created.
   | { t: 'room'; code: string; resumed?: boolean }
-  // To host and all controllers whenever the roster changes.
-  | { t: 'lobby'; players: LobbyPlayer[] }
+  // To host and all controllers whenever the roster or the chosen level
+  // changes. `levelId` is what a phone that joins late shows in its
+  // chooser, and what the host screen draws its level card from.
+  | { t: 'lobby'; players: LobbyPlayer[]; levelId: string }
   // To a controller after a successful join. Persist `token` and send it
   // with future joins to reclaim this seat.
   | { t: 'joined'; playerId: string; color: string; name: string; token: string }

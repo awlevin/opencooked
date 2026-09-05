@@ -4,6 +4,7 @@
 // this instance and proxies on other instances both arrive as a `Link`.
 
 import { Game } from '../game/game';
+import { DEFAULT_LEVEL_ID, isLevelId } from '../shared/levels';
 import type { S2C } from '../shared/protocol';
 import { MAX_PLAYERS, PLAYER_COLORS, SNAPSHOT_MS, TICK_MS } from '../shared/types';
 import type { LobbyPlayer, Phase, Snapshot } from '../shared/types';
@@ -126,12 +127,13 @@ export class Room {
         phase: 'lobby',
         seq: 1,
         seats: [],
+        levelId: DEFAULT_LEVEL_ID,
         owner: ctx.instanceId,
         hostConnected: false,
       };
       if (!(await ctx.store.createRoom(rec))) continue;
       if (!(await ctx.store.acquireLease(code, ctx.instanceId, LEASE_MS))) continue;
-      const room = new Room(ctx, rec, new Game());
+      const room = new Room(ctx, rec, new Game({ levelId: DEFAULT_LEVEL_ID }));
       await room.init();
       return room;
     }
@@ -145,7 +147,9 @@ export class Room {
   static async adopt(ctx: RoomCtx, rec: RoomRecord): Promise<Room | null> {
     if (!(await ctx.store.acquireLease(rec.code, ctx.instanceId, LEASE_MS))) return null;
 
-    const game = new Game();
+    // The record names the level; the checkpoint, if there is one, overrides
+    // it with whatever level the round in flight is actually being played on.
+    const game = new Game({ levelId: rec.levelId });
     const snap = await ctx.store.getSnapshot(rec.code);
     if (snap && snap.phase !== 'lobby') {
       try {
@@ -155,7 +159,11 @@ export class Room {
       }
     }
 
-    const room = new Room(ctx, { ...rec, owner: ctx.instanceId, hostConnected: false }, game);
+    const room = new Room(
+      ctx,
+      { ...rec, levelId: game.levelId, owner: ctx.instanceId, hostConnected: false },
+      game,
+    );
     const now = Date.now();
     for (const stored of rec.seats) {
       // Every socket of the old instance is gone; the grace clock starts now.
@@ -233,7 +241,7 @@ export class Room {
 
     link.send({ t: 'room', code: this.code, resumed });
     link.send({ t: 'phase', phase: this.game.phase });
-    link.send({ t: 'lobby', players: this.roster() });
+    link.send(this.lobbyMsg());
     if (this.game.phase !== 'lobby') link.send({ t: 'state', s: this.game.snapshot });
     if (this.game.phase === 'gameover') link.send(this.gameoverMsg());
 
@@ -357,7 +365,7 @@ export class Room {
 
     this.host?.send({ t: 'sim', owner: 'server' });
     this.host?.send({ t: 'phase', phase: this.game.phase });
-    this.host?.send({ t: 'lobby', players: this.roster() });
+    this.host?.send(this.lobbyMsg());
     if (this.game.phase !== 'lobby') this.host?.send({ t: 'state', s: this.game.snapshot });
     if (this.game.phase === 'gameover') this.host?.send(this.gameoverMsg());
     if (this.game.phase === 'playing' && this.host) this.startLoop();
@@ -388,6 +396,7 @@ export class Room {
         this.rec.seq = Math.max(this.rec.seq, rec.seq);
         this.rec.phase = rec.phase;
         this.rec.seats = rec.seats;
+        this.rec.levelId = rec.levelId;
         this.rec.updatedAt = Date.now();
         void this.ctx.store
           .putRoom({ ...this.rec, owner: this.ctx.instanceId, hostConnected: true })
@@ -490,8 +499,13 @@ export class Room {
     return PLAYER_COLORS[this.seats.size % PLAYER_COLORS.length];
   }
 
+  /** The lobby broadcast: who is in, and which kitchen they are about to cook in. */
+  private lobbyMsg(): S2C {
+    return { t: 'lobby', players: this.roster(), levelId: this.game.levelId };
+  }
+
   private sendLobby(): void {
-    this.broadcast({ t: 'lobby', players: this.roster() });
+    this.broadcast(this.lobbyMsg());
   }
 
   // --- messaging -----------------------------------------------------------
@@ -584,6 +598,7 @@ export class Room {
     if (this.relaying) return;
     this.rec.phase = this.game.phase;
     this.rec.seats = this.storedSeats();
+    this.rec.levelId = this.game.levelId;
     this.rec.owner = this.ctx.instanceId;
     this.rec.updatedAt = Date.now();
     await this.ctx.store.putRoom(this.rec).catch((err) => {
@@ -690,7 +705,10 @@ export class Room {
         this.start(link);
         return;
       case 'again':
-        this.again(link);
+        this.again(link, msg.levelId);
+        return;
+      case 'select':
+        this.select(link, msg.levelId);
         return;
       case 'input': {
         const pid = this.byConn.get(link.id);
@@ -810,7 +828,7 @@ export class Room {
       token: seat.token,
     });
     link.send({ t: 'phase', phase: this.game.phase });
-    link.send({ t: 'lobby', players: this.roster() });
+    link.send(this.lobbyMsg());
     if (this.game.phase === 'gameover') link.send(this.gameoverMsg());
     if (link instanceof RemoteLink) link.requestBind(seat.playerId);
   }
@@ -839,14 +857,35 @@ export class Room {
     console.log(`[room ${this.code}] round started with ${this.seats.size} chef(s)`);
   }
 
-  private again(link: Link): void {
+  private again(link: Link, levelId: unknown): void {
     if (!this.mayControl(link)) return;
     if (this.game.phase !== 'gameover') return;
     this.stopLoop();
-    this.game.toLobby();
+    // "Next level" is Play Again with a destination. An unknown id keeps the
+    // level we just played, so a stale phone build cannot strand the room.
+    this.game.toLobby(isLevelId(levelId) ? levelId : undefined);
+    this.rec.levelId = this.game.levelId;
     this.broadcast({ t: 'phase', phase: 'lobby' });
     this.sendLobby();
     void this.checkpoint();
+  }
+
+  /**
+   * Pick the kitchen. Lobby only: swapping the level mid-round would tip
+   * every chef into a different building, and after the round the results are
+   * still on screen. The choice lives in the room record, so it survives the
+   * host's next reconnect, and the lobby broadcast carries it so a phone that
+   * joins late shows the same level as everyone else.
+   */
+  private select(link: Link, levelId: unknown): void {
+    if (!this.mayControl(link)) return;
+    if (this.game.phase !== 'lobby') return;
+    if (!isLevelId(levelId) || levelId === this.game.levelId) return;
+    this.game.toLobby(levelId);
+    this.rec.levelId = this.game.levelId;
+    this.sendLobby();
+    void this.persist();
+    console.log(`[room ${this.code}] level set to ${this.game.levelId}`);
   }
 
   // --- disconnects ---------------------------------------------------------

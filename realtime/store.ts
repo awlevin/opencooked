@@ -25,6 +25,8 @@ export interface RoomRecord {
   /** Monotonic player-id counter, so a restored room never reuses an id. */
   seq: number;
   seats: Seat[];
+  /** The level this room is set to play. Survives a host resume. */
+  levelId: string;
   /** Instance that last ran the sim (informational; the lease is the truth). */
   owner: string | null;
   hostConnected: boolean;
