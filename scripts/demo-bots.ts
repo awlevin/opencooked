@@ -18,6 +18,7 @@ import WebSocket from 'ws';
 import type { Btn, C2S, S2C } from '../shared/protocol';
 import { LOCAL_PORT, WS_PATH } from '../shared/protocol';
 import { createLevel } from '../shared/levels';
+import { DISHES, dishesOfCourse } from '../shared/catalogue';
 import type { HeldItem, IngredientType, PlayerState, Snapshot, Tile, Vec2 } from '../shared/types';
 import { COOK_MS, POT_CAPACITY } from '../shared/types';
 
@@ -211,7 +212,15 @@ const STAGE_COUNTERS: Access[] = stationsOfType('counter')
 /* ============================== small utils ============================== */
 
 const ZERO: Vec2 = { x: 0, y: 0 };
-const INGREDIENTS: readonly IngredientType[] = ['onion', 'tomato', 'mushroom'];
+
+/**
+ * The bots cook soup and nothing else: one pot, three chopped vegetables, a
+ * plate, the window. Every vegetable any soup on the books calls for, taken
+ * from the catalogue so a new soup needs no edit here.
+ */
+const INGREDIENTS: readonly IngredientType[] = [
+  ...new Set(dishesOfCourse('soup').flatMap((id) => DISHES[id].parts)),
+];
 
 /** `need` minus `have`, treating both as multisets. */
 function multisetDiff(need: readonly IngredientType[], have: readonly IngredientType[]): IngredientType[] {
@@ -644,10 +653,15 @@ export class BotTeam {
     }
   }
 
-  /** The oldest order whose recipe is not already claimed by another stove. */
+  /**
+   * The oldest soup order whose recipe is not already claimed by another
+   * stove. Burgers and sushi are somebody else's problem: a bot that tried to
+   * boil a bun would just tie up a ring.
+   */
   private pickRecipe(snap: Snapshot): IngredientType[] | null {
     const claimed = [...this.jobs.values()];
     for (const order of snap.orders) {
+      if (DISHES[order.dish]?.course !== 'soup') continue;
       const orders = snap.orders.filter((o) => sameRecipe(o.recipe, order.recipe)).length;
       const taken = claimed.filter((r) => sameRecipe(r, order.recipe)).length;
       if (orders > taken) return [...order.recipe];
