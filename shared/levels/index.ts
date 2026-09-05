@@ -14,7 +14,7 @@ import { SUSHI } from './worlds/sushi';
 
 export type { Level } from './parse';
 export type { LevelDef, WorldDef, WorldMotif, WorldTheme } from './types';
-export { capabilitiesOf, isWalkable, parseLevel, CRATE_OF } from './parse';
+export { capabilitiesOf, parseLevel } from './parse';
 
 /** Every world, in the order a table plays them. */
 export const WORLDS: readonly WorldDef[] = [HOME, GRILL, SUSHI];

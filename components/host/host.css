@@ -451,8 +451,10 @@ body {
   display: flex;
   gap: clamp(8px, 1.4vw, 26px);
 }
+/* The results column now names the level as well, so the two big elements
+   give a little height back to keep the whole card inside 16:9. */
 .host-root .stars svg {
-  width: clamp(96px, 15vw, 380px);
+  width: clamp(88px, 12.5vw, 320px);
   height: auto;
   animation: host-star-in 0.5s cubic-bezier(0.2, 1.6, 0.4, 1) both;
 }
@@ -489,7 +491,7 @@ body {
   line-height: 0.9;
 }
 .host-root .final-score .n {
-  font-size: clamp(84px, 15vw, 400px);
+  font-size: clamp(76px, 13vw, 340px);
   font-weight: 800;
   color: var(--cream);
   -webkit-text-stroke: 0.055em var(--ink);

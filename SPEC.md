@@ -45,7 +45,7 @@ phones (/join, components/controller/)   host laptop → TV (/, components/host/
 ## File ownership (for parallel agents — do not edit outside your set)
 
 - **realtime agent**: `realtime/**`, `app/api/ws/route.ts`,
-  `server/local.ts`, `game/game.ts`, `shared/levels.ts`, `scripts/smoke.ts`
+  `server/local.ts`, `game/game.ts`, `shared/levels/**`, `scripts/smoke.ts`
 - **host-ui agent**: `app/page.tsx`, `components/host/**`
 - **controller-ui agent**: `app/join/page.tsx`, `components/controller/**`
 - Frozen contract (read-only for everyone): `shared/types.ts`,
@@ -58,9 +58,9 @@ phones (/join, components/controller/)   host laptop → TV (/, components/host/
 
 ## Game rules (authoritative numbers live in `shared/types.ts`)
 
-Kitchen is a tile grid (~13×8; level defined in `shared/levels.ts` by the
-game-server agent — walkable floor in the middle, stations around the edges
-and on a center island so players have to route around each other).
+Kitchen is a tile grid (11×7 to 15×8 depending on the level; see **Worlds
+and levels** below) — walkable floor in the middle, stations around the edges
+and on islands or dividing walls so players have to route around each other.
 
 **Stations**: ingredient crates (one raw ingredient each), cutting boards,
 stoves holding a pot or a frying pan, plate stack, serve window, trash,
@@ -113,16 +113,19 @@ with no cheese in it. Tipping a vessel onto a plate is all-or-nothing.
 into a pot or pan if it cooks → assemble the parts on a plate, in any order,
 on any counter → carry the plate to the serve window.
 
-**Orders**: queue of up to 5 tickets, each a dish drawn at random from the
-level's menu. First order at start, a new one every 15 s. Each lives 60 s;
+**Orders**: queue of up to 5 tickets (`maxOrders`), each a dish drawn at
+random from the level's menu. First order at start, a new one every 15 s
+(`orderSpawnMs`). Each lives 60 s (`orderMs`);
 expiry = −10 points and `missed`+1. Serving a plate whose parts match a
 queued order (multiset equality, earliest match wins): +20 points + time
 bonus (up to +10, scaled by the matched order's remaining fraction),
 `served`+1. No matching order: plate is consumed, 0 points.
 
-**Round**: 180 s. Any controller can Start from the lobby (needs ≥1
-player) and Play Again from gameover (returns everyone to the lobby).
-Players may join mid-round and are spawned immediately.
+**Round**: 180 s (`roundMs`). Any controller can Start from the lobby (needs
+≥1 player), pick the level from the lobby, and from gameover either Play Again
+or move the room to the next level. Players may join mid-round and are spawned
+immediately. Every number in brackets above is a per-level override; the
+constants in `shared/types.ts` are only the defaults.
 
 **Movement**: joystick vector → velocity (3.6 tiles/s). Circle collision
 (r=0.35) vs non-floor tiles and other players (push apart softly). Facing
@@ -162,13 +165,46 @@ held down (server sets `chopping`, accumulates `chopMs`). Otherwise → dash
 (150 ms at 8 tiles/s, 500 ms cooldown). Two chefs working one board, or one
 fire, is never a speedup.
 
-**Level ASCII** (`shared/levels.ts`): `.` floor, `#` counter, `B` board,
+### Worlds and levels (`shared/levels/`)
+
+A **level** is data: an id, a name, an ASCII map, a menu of DishIds and
+optional tuning (`roundMs`, `orderMs`, `orderSpawnMs`, `maxOrders`). A
+**world** is a file under `shared/levels/worlds/` holding a name, a tagline, a
+`WorldTheme` (palette + motif id) and its levels in playing order.
+`shared/levels/index.ts` exports `WORLDS`, `LEVELS`, `levelById`,
+`nextLevelId` and `DEFAULT_LEVEL_ID`, and is the only place that enumerates
+levels.
+
+**Level ASCII**: `.` floor, `@` floor + player spawn, `#` counter, `B` board,
 `S` stove with a pot, `F` stove with a frying pan, `P` plate stack,
 `W` serve window, `X` trash, `E` extinguisher mount. Crates: `O` onion,
 `T` tomato, `M` mushroom, `L` lettuce, `C` cheese, `U` bun, `R` raw meat,
-`I` rice, `H` fish, `V` seaweed. The starter kitchen stocks the three soup
-vegetables plus bun, meat and cheese, runs two pots and one pan, and its menu
-is the ten soups plus Burger and Cheeseburger.
+`I` rice, `H` fish, `V` seaweed.
+
+`parseLevel` refuses anything unplayable, at import time: ragged rows, unknown
+glyphs, fewer than 6 spawns, a spawn or a station cut off from the room (flood
+fill over floor), a missing plate stack / serve window / trash / extinguisher,
+non-positive tuning, or a menu the kitchen cannot cook (`assertMenuMakeable`).
+
+| World | Level | Menu | Layout | Tuning |
+|---|---|---|---|---|
+| Home Kitchen | 1 Mise en place | Onion Soup | 11×7 open room, 2 pots, 2 boards | defaults |
+| | 2 Dinner rush | 3 single-veg soups + Garden Soup | centre island holding the plates | order every 14 s |
+| | 3 Family reunion | those soups + Burger, Cheeseburger | the starter kitchen: 2 pots, 1 pan, 6 crates | defaults |
+| Boardwalk Grill | 1 Flat top | Burger | 2 pans, plates on a small island | defaults |
+| | 2 Cheese please | Burger, Cheeseburger, Side Salad | every crate on the south wall, every pan on the north | ticket 55 s, every 14 s |
+| | 3 Boardwalk deluxe | Cheeseburger, Salad Burger, Deluxe Burger | split kitchen: one gap, one board *in* the wall | ticket 45 s, every 12 s, 4 max |
+| Night Sushi Bar | 1 Rice & fish | Nigiri | 3 rice pots, 2 boards on an island | defaults |
+| | 2 Rolling | Nigiri, Maki Roll | nori and plates behind a counter wall | ticket 55 s, every 13 s |
+| | 3 Omakase | Nigiri, Maki Roll, Veggie Roll | 6 pots, 4 crates walled into the island, extinguisher across the room | ticket 45 s, every 11 s, 4 max |
+
+**Choosing a level**: `select {levelId}` from any controller, lobby only;
+`again {levelId?}` is Play Again with a destination (the phone's "Next
+level"). The `lobby` broadcast carries the chosen `levelId`, and the room
+record keeps it, so the choice survives a host reconnect. Every snapshot
+carries `levelId` and `worldId`: the host renderer resolves the world's theme
+from it once per frame, and a resumed host rebuilds the Game on the level the
+round is actually being played on.
 
 **Fire**: a vessel left `burnt` on a lit ring catches after `FIRE_MS`, and a
 burning tile sets one random non-floor neighbour alight every

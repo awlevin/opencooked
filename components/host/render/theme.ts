@@ -85,7 +85,7 @@ export const lerp = (a: number, b: number, t: number): number => a + (b - a) * t
 
 /**
  * World -> board-local pixels. Integer world coordinates are TILE CENTRES
- * (see shared/levels.ts), so tile (i, j) is drawn at (i*T, j*T) while an
+ * (see shared/levels/parse.ts), so tile (i, j) is drawn at (i*T, j*T) while an
  * entity standing at world (i, j) is drawn half a tile further in.
  */
 export const worldToPx = (v: number, T: number): number => (v + 0.5) * T;

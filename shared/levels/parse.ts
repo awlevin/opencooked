@@ -51,7 +51,7 @@ export interface Level {
  *   O  onion    T  tomato   M  mushroom    L  lettuce   C  cheese
  *   U  bun      R  raw meat I  rice        H  fish      V  seaweed (nori)
  */
-export const CRATE_OF: Readonly<Record<string, IngredientType>> = {
+const CRATE_OF: Readonly<Record<string, IngredientType>> = {
   O: 'onion',
   T: 'tomato',
   M: 'mushroom',
@@ -97,7 +97,7 @@ function tileFromChar(ch: string): Tile {
 }
 
 /** True for tiles a player may stand on. */
-export function isWalkable(tile: Tile): boolean {
+function isWalkable(tile: Tile): boolean {
   return tile.t === 'floor';
 }
 

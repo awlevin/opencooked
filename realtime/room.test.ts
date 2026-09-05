@@ -172,6 +172,10 @@ test('"next level" is Play Again with a destination', async () => {
   const phone = new TestLink('phone');
   room.handleMessage(phone, { t: 'join', room: rec.code, name: 'Alice', token: 'tok' });
 
+  // The results are still on screen: the level only moves through "again".
+  room.handleMessage(phone, { t: 'select', levelId: 'sushi-1' });
+  assert.equal(room.snapshot.levelId, 'home-2');
+
   room.handleMessage(phone, { t: 'again', levelId: 'home-3' });
   assert.equal(room.phase, 'lobby');
   assert.equal(room.snapshot.levelId, 'home-3');

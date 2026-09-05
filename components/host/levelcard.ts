@@ -5,8 +5,8 @@
 // its shape and its mood on the TV before anyone commits to it.
 
 import { DISHES } from '@/shared/catalogue';
-import type { WorldTheme } from '@/shared/levels';
-import { levelById, themeOf } from '@/shared/levels';
+import type { Level, WorldTheme } from '@/shared/levels';
+import { themeOf } from '@/shared/levels';
 import type { Tile } from '@/shared/types';
 
 /** Station colours for the minimap. Equipment, so they do not vary by world. */
@@ -23,15 +23,9 @@ const STATION: Partial<Record<Tile['t'], string>> = {
 const MENU_SHOWN = 3;
 
 /** One kitchen, drawn small. `cell` is in device pixels. */
-export function drawMiniMap(canvas: HTMLCanvasElement, levelId: string, cell = 16): void {
+export function drawMiniMap(canvas: HTMLCanvasElement, level: Level, cell = 16): void {
   const c = canvas.getContext('2d');
   if (!c) return;
-  let level;
-  try {
-    level = levelById(levelId);
-  } catch {
-    return; // an id we do not ship: leave whatever was there
-  }
   const theme: WorldTheme = themeOf(level.worldId);
   canvas.width = level.w * cell;
   canvas.height = level.h * cell;
@@ -66,13 +60,7 @@ export function drawMiniMap(canvas: HTMLCanvasElement, levelId: string, cell = 1
 }
 
 /** "Onion Soup · Burger · Cheeseburger +2 more" — what this level serves. */
-export function menuLine(levelId: string): string {
-  let level;
-  try {
-    level = levelById(levelId);
-  } catch {
-    return '';
-  }
+export function menuLine(level: Level): string {
   const names = level.menu.map((id) => DISHES[id].name);
   const shown = names.slice(0, MENU_SHOWN).join(' · ');
   const rest = names.length - MENU_SHOWN;

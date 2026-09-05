@@ -1,6 +1,10 @@
-// Kitchen geometry: wooden floor and the stations that sit on it.
+// Kitchen geometry: the floor of a world and the stations that sit on it.
 // Every tile is drawn inside a 0..1 unit box (the caller scales by tile size),
 // so line widths and radii are expressed as fractions of a tile.
+//
+// Every function here takes the level's `WorldTheme`: the counters, the ink
+// and the floor are the world's, while the crates, the steel and the food keep
+// the world-independent colours in `theme.ts`.
 
 import { rawIngredient, type IngredientType } from '@/shared/catalogue';
 import type { WorldTheme } from '@/shared/levels';
@@ -43,14 +47,23 @@ export function drawFloor(
   c.fillRect(0, 0, W, H);
 }
 
-/** The counter slab every station stands on, in the world's counter colours. */
-function slab(c: CanvasRenderingContext2D, theme: WorldTheme): void {
+/**
+ * The counter slab every station stands on, in the world's counter colours.
+ * `top`/`bottom` override them for a station that is the same everywhere —
+ * a range is steel in every kitchen, never cabinetry.
+ */
+function slab(
+  c: CanvasRenderingContext2D,
+  theme: WorldTheme,
+  top: string = theme.counterTop,
+  bottom: string = theme.counterBottom,
+): void {
   rr(c, 0.02, 0.1, 0.96, 0.9, 0.16);
   c.fillStyle = theme.shadow;
   c.fill();
   const g = c.createLinearGradient(0, 0.02, 0, 0.94);
-  g.addColorStop(0, theme.counterTop);
-  g.addColorStop(1, theme.counterBottom);
+  g.addColorStop(0, top);
+  g.addColorStop(1, bottom);
   rr(c, 0.02, 0.02, 0.96, 0.9, 0.16);
   fillStroke(c, g, theme.ink, OUT);
   rr(c, 0.12, 0.09, 0.76, 0.14, 0.07);
@@ -384,8 +397,7 @@ export function drawTile(
       drawBoard(c, tile, theme);
       return;
     case 'stove':
-      // A range is a range in every world: steel, not cabinetry.
-      slab(c, { ...theme, counterTop: PAL.metalHi, counterBottom: PAL.metalDark });
+      slab(c, theme, PAL.metalHi, PAL.metalDark);
       // The ring is always there; the pot may have been carried off.
       drawBurner(c, 0.5, 0.5, 0.66, time);
       if (tile.pot) drawVessel(c, tile.pot, 0.5, 0.5, 0.66, time);

@@ -61,8 +61,8 @@ export class LobbyScreen {
     this.levelNameEl.textContent = level.name;
     this.levelWorldEl.textContent = world?.name ?? '';
     this.levelStepEl.textContent = `${level.index} / ${level.count}`;
-    this.levelMenuEl.textContent = menuLine(levelId);
-    drawMiniMap(this.levelMapEl, levelId);
+    this.levelMenuEl.textContent = menuLine(level);
+    drawMiniMap(this.levelMapEl, level);
   }
 
   reset(): void {

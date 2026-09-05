@@ -57,6 +57,19 @@ has to fetch the extinguisher off the wall and hold **SPRAY**. Rounds are 3
 minutes. Full rules, the menu and the interaction table live in
 [SPEC.md](SPEC.md).
 
+### Nine kitchens, three worlds
+
+| World | Levels | What is new |
+|---|---|---|
+| **Home Kitchen** | Mise en place · Dinner rush · Family reunion | soup by the potful, then a menu that needs the pan too |
+| **Boardwalk Grill** | Flat top · Cheese please · Boardwalk deluxe | raw meat: chop the patty, fry it, *then* build the burger — ending in a kitchen split in two by a counter wall |
+| **Night Sushi Bar** | Rice & fish · Rolling · Omakase | rice boils one portion at a time, nori is walled in behind the pass, and six pots are all burning at once |
+
+Any chef picks the kitchen from their phone in the lobby (`‹ ›` above START),
+and the game-over screen offers **Next level**. Each world has its own
+palette and its own floor, resolved from the level and passed to the renderer
+— which is also where a future sprite pack will slot in.
+
 ## How it works
 
 A Next.js app with **native WebSockets**, running the same authoritative
@@ -104,7 +117,8 @@ do the same job in a single process.
 
 ### The rest of the code
 
-- **`game/game.ts` + `shared/levels.ts`** — the pure simulation. No I/O.
+- **`game/game.ts` + `shared/levels/`** — the pure simulation and the level
+  catalogue. No I/O.
 - **`components/host/`** — the TV view: canvas kitchen, snapshot
   interpolation, QR lobby.
 - **`components/controller/`** — the phone gamepad: pointer-events joystick,
@@ -120,10 +134,34 @@ The kitchen, the chefs, and every ingredient are drawn in code on a
 npm install
 npm run dev        # custom Next dev server on :3000 (HMR + websockets)
 npm run typecheck  # tsc --noEmit, strict
+npm test           # node:test — sim rules, levels, room protocol
 npm run build      # next build
 ```
 
 Add `?debug` to the host URL for tile coordinates.
+
+### Adding a level, or a world
+
+Levels are data. To add one, open the world's file in
+`shared/levels/worlds/`, copy a level entry, draw the room in ASCII (legend in
+[SPEC.md](SPEC.md); `@` is a spawn) and list the dishes it serves:
+
+```ts
+{
+  id: 'home-4',
+  name: 'Late supper',
+  rows: ['#O#S#S#B#', '#.......#', '#.@...@.#', ...],
+  menu: ['onion-soup', 'side-salad'],
+  orderMs: 50_000,          // every tuning field is optional
+}
+```
+
+A new world is a new file exporting a `WorldDef` — a name, a tagline, a
+`WorldTheme` (palette plus one of the renderer's motif ids) and its levels —
+plus one line in `WORLDS` in `shared/levels/index.ts`. `npm test` then parses
+your map, refuses it if a station is walled off or the menu cannot be cooked
+in it, and drives a chef through a whole ticket to make sure it can be
+played.
 
 ### Smoke tests
 

@@ -2,7 +2,7 @@
 //
 // Three bots join a room as ordinary controllers and run a closed-loop kitchen
 // brain: fetch -> chop -> pot -> plate -> serve, on repeat, using the real
-// level geometry from shared/levels.ts. They are used to film the launch demo
+// level geometry from shared/levels/. They are used to film the launch demo
 // (demo/capture), and can be driven standalone for a quick sanity run:
 //
 //   PORT=3210 npx tsx scripts/demo-bots.ts            # own host socket
