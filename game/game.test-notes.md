@@ -18,16 +18,17 @@ choppable, and this keeps boards free for the chop queue. Picking an item
 back up is unchanged and already handles plates (`nothing | counter/board
 with item | pick it up`).
 
-## 2. A pot only counts down once it is full
+## 2. A vessel only counts down once it is full
 
 `shared/types.ts` says `COOK_MS = 8000; // full pot -> done`, but the table
-says adding an ingredient makes the pot "start/keep cooking". Both are
-honoured: `Pot.state` becomes `'cooking'` on the first chopped ingredient
-(so the host can render an active pot), while `Pot.cookMs` only advances
-when `contents.length === POT_CAPACITY`. The 8 s therefore always measures
-from the moment the third ingredient goes in. On the `done` transition
-`cookMs` resets to 0 and is reused as the burn clock, per the `Pot.cookMs`
-comment ("elapsed cooking (or burning) time").
+says adding an ingredient makes the vessel "start/keep cooking". Both are
+honoured: `Pot.state` becomes `'cooking'` on the first ingredient (so the
+host can render an active pot), while `Pot.cookMs` only advances once the
+vessel holds a full batch — three vegetables, one portion of rice, or one
+patty in a pan. The clock therefore always measures from the moment the
+batch is complete. On the `done` transition `cookMs` resets to 0 and is
+reused as the burn clock, per the `Pot.cookMs` comment ("elapsed cooking (or
+burning) time"), and every piece in the batch is marked `cooked`.
 
 ## 3. Two chefs on one board do not chop twice as fast
 

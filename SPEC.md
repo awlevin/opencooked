@@ -49,7 +49,8 @@ phones (/join, components/controller/)   host laptop → TV (/, components/host/
 - **host-ui agent**: `app/page.tsx`, `components/host/**`
 - **controller-ui agent**: `app/join/page.tsx`, `components/controller/**`
 - Frozen contract (read-only for everyone): `shared/types.ts`,
-  `shared/protocol.ts`, `package.json`, `tsconfig.json`, `next.config.ts`,
+  `shared/catalogue.ts`, `shared/protocol.ts`, `package.json`,
+  `tsconfig.json`, `next.config.ts`,
   `app/layout.tsx`, `app/globals.css`
 - Legacy Vite implementation kept temporarily as reference (port from it,
   never import it): `src/**`, `index.html`, `join.html`,
@@ -61,30 +62,63 @@ Kitchen is a tile grid (~13×8; level defined in `shared/levels.ts` by the
 game-server agent — walkable floor in the middle, stations around the edges
 and on a center island so players have to route around each other).
 
-**Stations**: ingredient crates (onion/tomato/mushroom), cutting boards,
-stoves with a pot on the ring, plate stack, serve window, trash, plain
-counters (can hold one item), and one wall bracket holding the kitchen's
-only fire extinguisher.
+**Stations**: ingredient crates (one raw ingredient each), cutting boards,
+stoves holding a pot or a frying pan, plate stack, serve window, trash,
+plain counters (can hold one item), and one wall bracket holding the
+kitchen's only fire extinguisher.
 
-**Pots** are carryable. A pot lifted off a ring leaves a bare burner and
-becomes a held item; it can be set on any stove ring or empty counter, and
-it works the same wherever it is — ingredients go in, a plate scoops the
-soup out. Only a pot **on a ring** cooks: off the heat every timer freezes
-where it was. Boards, crates, the plate stack and the serve window all
-refuse a pot.
+### Ingredients and dishes (`shared/catalogue.ts`)
+
+Food is data. An ingredient declares its own preparation, and nothing else
+in the codebase hard-codes a recipe:
+
+| Ingredient | Chop | Cook | Batch |
+|---|---|---|---|
+| onion, tomato, mushroom | yes | boil | 3 |
+| lettuce, cheese, fish | yes | — | — |
+| bun, seaweed (nori) | — | — | — |
+| meat (patty) | yes | fry | 1 |
+| rice | — | boil | 1 |
+
+A part is **ready** when it has had every preparation its definition asks
+for: `(!chop || chopped) && (!cook || cooked)`. There are no per-dish
+overrides — a dish that wants raw tomato has to use a different vegetable.
+
+A **dish** is a name and a multiset of parts. The book holds the ten
+three-vegetable soups (Onion Soup … Garden Soup), Side Salad
+[lettuce, cheese], Burger [bun, meat], Cheeseburger, Salad Burger, Deluxe
+Burger [bun, meat, cheese, lettuce], Nigiri [rice, fish], Maki Roll
+[rice, fish, seaweed] and Veggie Roll [rice, seaweed, lettuce].
+
+A level declares a **menu** — the dishes its orders are drawn from. A Game
+whose menu the level cannot cook (missing crate, board, pot or pan) throws
+at construction rather than issuing a ticket nobody can fill.
+
+**Vessels**: a pot boils, a pan fries. Both are carryable, and both behave
+identically to a player — things go in, a plate takes what comes out. A pot
+holds **one batch of one batch size**: three vegetables, or one portion of
+rice, and never a mix of the two. A pan holds one patty. Cooking starts
+when the vessel is full and is what marks the contents `cooked`; a pot
+takes 8 s, a pan 5 s, and either burns 10 s later if ignored. Only a vessel
+**on a ring** cooks: off the heat every timer freezes where it was. Boards,
+crates, the plate stack and the serve window all refuse cookware.
+
+**Plating rule** — one rule, every path: a part may join a plate when it is
+ready *and* the plate's contents plus that part are still a sub-multiset of
+some dish on the menu. That is what lets a cheeseburger be assembled in any
+order, stops a second bun, refuses a raw patty, and refuses cheese on a menu
+with no cheese in it. Tipping a vessel onto a plate is all-or-nothing.
 
 **Flow**: grab raw ingredient from crate → chop on board (hold B, 1.5 s) →
-drop 3 chopped ingredients into a pot → cooks 8 s → done (burns 10 s later
-if ignored) → grab plate, use it on the done pot to fill → carry the soup
-plate to the serve window.
+into a pot or pan if it cooks → assemble the parts on a plate, in any order,
+on any counter → carry the plate to the serve window.
 
-**Orders**: queue of up to 5 recipes (each = multiset of 3 ingredients,
-e.g. onion-onion-onion or onion-tomato-mushroom). First order at start, a
-new one every 15 s. Each lives 60 s; expiry = −10 points and `missed`+1.
-Serving a soup whose contents match a queued order (multiset equality,
-earliest match wins): +20 points + time bonus (up to +10, scaled by the
-matched order's remaining fraction), `served`+1. No matching order: plate
-is consumed, 0 points.
+**Orders**: queue of up to 5 tickets, each a dish drawn at random from the
+level's menu. First order at start, a new one every 15 s. Each lives 60 s;
+expiry = −10 points and `missed`+1. Serving a plate whose parts match a
+queued order (multiset equality, earliest match wins): +20 points + time
+bonus (up to +10, scaled by the matched order's remaining fraction),
+`served`+1. No matching order: plate is consumed, 0 points.
 
 **Round**: 180 s. Any controller can Start from the lobby (needs ≥1
 player) and Play Again from gameover (returns everyone to the lobby).
@@ -101,18 +135,23 @@ step in front of the player (round(pos + dir)).
 | nothing | crate | pick raw ingredient |
 | nothing | counter/board with item | pick it up (aborts chop progress) |
 | nothing | plates | pick empty plate |
-| nothing | pot (ring or counter), burnt | dump the char → idle empty |
-| nothing | pot (ring or counter), any other state | pick the pot up (a ring is left bare) |
+| nothing | vessel (ring or counter), burnt | dump the char → idle empty |
+| nothing | vessel (ring or counter), any other state | pick it up (a ring is left bare) |
 | ingredient | empty counter/board | place it |
-| chopped ingredient | pot not full, not done/burnt | add to pot (pot starts/keeps cooking; if it was `done` you can't add) |
-| any item | trash | ingredient: discard; plate: empty its soup, keep plate; pot: tip it out, keep the pot; extinguisher: refused |
-| empty plate | done pot (ring or counter) | fill plate with soup, pot → idle empty |
-| pot | empty stove ring | set it down (timers resume) |
-| pot | empty counter | set it down |
-| pot (done) | counter holding an empty plate | pour the soup onto the plate, keep the pot |
-| soup plate | serve | deliver (scoring above) |
+| prepared ingredient | vessel that accepts it, not full, not done/burnt | add to it (it starts/keeps cooking; if it was `done` you can't add) |
+| ready ingredient | counter/board holding a plate | add it to the plate (plating rule) |
+| plate | counter/board holding a ready ingredient | take it onto the plate (plating rule) |
+| any item | trash | ingredient: discard; plate: empty it, keep the plate; vessel: tip it out, keep the vessel; extinguisher: refused |
+| plate | done vessel (ring or counter) | tip the whole batch onto the plate, vessel → idle empty |
+| vessel | empty stove ring | set it down (timers resume) |
+| vessel | empty counter | set it down |
+| vessel (done) | counter holding a plate | tip the batch onto the plate, keep the vessel |
+| loaded plate | serve | deliver (scoring above) |
 | nothing | stocked extinguisher bracket | take the extinguisher |
 | extinguisher | empty bracket / empty counter | put it down |
+
+Every plate-filling row above goes through the one plating rule, so a part
+that no menu dish still wants is simply refused.
 
 A burning tile refuses every A press. Put the fire out first.
 
@@ -123,10 +162,18 @@ held down (server sets `chopping`, accumulates `chopMs`). Otherwise → dash
 (150 ms at 8 tiles/s, 500 ms cooldown). Two chefs working one board, or one
 fire, is never a speedup.
 
-**Fire**: a pot left `burnt` on a lit ring catches after `FIRE_MS`, and a
+**Level ASCII** (`shared/levels.ts`): `.` floor, `#` counter, `B` board,
+`S` stove with a pot, `F` stove with a frying pan, `P` plate stack,
+`W` serve window, `X` trash, `E` extinguisher mount. Crates: `O` onion,
+`T` tomato, `M` mushroom, `L` lettuce, `C` cheese, `U` bun, `R` raw meat,
+`I` rice, `H` fish, `V` seaweed. The starter kitchen stocks the three soup
+vegetables plus bun, meat and cheese, runs two pots and one pan, and its menu
+is the ten soups plus Burger and Cheeseburger.
+
+**Fire**: a vessel left `burnt` on a lit ring catches after `FIRE_MS`, and a
 burning tile sets one random non-floor neighbour alight every
-`FIRE_SPREAD_MS`. Igniting a tile ruins any food on it; pots and the
-extinguisher survive (a pot goes `burnt`). Fire never spreads to the serve
+`FIRE_SPREAD_MS`. Igniting a tile ruins any food on it; cookware and the
+extinguisher survive (a vessel goes `burnt`). Fire never spreads to the serve
 window or the extinguisher bracket, and never goes out on its own — it is a
 time sink, not a fail state, and the only answer is the extinguisher.
 

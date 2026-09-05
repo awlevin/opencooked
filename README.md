@@ -45,14 +45,17 @@ Wi-Fi scan the QR.
 
 ### The game
 
-Grab an ingredient from a crate, chop it on a board (hold **CHOP**), drop 3
-chopped ingredients into a pot, wait for the ding, fill a plate from the pot,
-and run the soup to the serve window before the order ticket expires. Pots
-can be carried anywhere — off the ring they stop cooking, and a full one
-pours straight onto a waiting plate. Ignore a pot and it burns, then catches
-fire and spreads, so somebody has to fetch the extinguisher off the wall and
-hold **SPRAY**. Rounds are 3 minutes. Full rules and the interaction
-table live in [SPEC.md](SPEC.md).
+Every ticket is a dish, and every dish is a list of ingredients that each
+know how they want to be prepared: onions are chopped and boiled three to a
+pot, a patty is chopped and then fried in a pan, rice boils one portion at a
+time, and a bun goes straight on the plate. Grab, chop (hold **CHOP**), cook,
+and assemble on a plate in any order you like — then run it to the serve
+window before the ticket expires. Pots and pans can be carried anywhere; off
+the ring they stop cooking, and a finished one tips straight onto a waiting
+plate. Ignore one and it burns, then catches fire and spreads, so somebody
+has to fetch the extinguisher off the wall and hold **SPRAY**. Rounds are 3
+minutes. Full rules, the menu and the interaction table live in
+[SPEC.md](SPEC.md).
 
 ## How it works
 
