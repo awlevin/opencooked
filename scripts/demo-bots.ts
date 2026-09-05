@@ -185,7 +185,12 @@ const CRATES: Record<IngredientType, Access> = (() => {
 const BOARDS: Access[] = stationsOfType('board')
   .map(accessOf)
   .filter((a): a is Access => a !== null);
+/**
+ * Only the boiling rings. The bots cook soups, so a frying pan is not a stove
+ * they can plan around — feeding it a vegetable would just stall the kitchen.
+ */
 const STOVES: Access[] = stationsOfType('stove')
+  .filter((pos) => LEVEL.tiles[idxOf(pos.x, pos.y)].pot?.kind === 'pot')
   .map(accessOf)
   .filter((a): a is Access => a !== null);
 const PLATES: Access = accessOf(stationsOfType('plates')[0])!;

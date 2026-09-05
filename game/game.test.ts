@@ -18,6 +18,7 @@ import {
   EXTINGUISH_MS,
   FIRE_MS,
   FIRE_SPREAD_MS,
+  FRY_MS,
   ORDER_SPAWN_MS,
   POT_CAPACITY,
   TICK_MS,
@@ -122,7 +123,9 @@ function harness(players = 1, seed = 7): Harness {
 
 const CRATES = indicesOf('crate');
 const BOARDS = indicesOf('board');
-const STOVES = indicesOf('stove');
+/** Boiling rings and the frying ring are both 'stove' tiles; the vessel differs. */
+const STOVES = indicesOf('stove').filter((i) => LEVEL.tiles[i]!.pot?.kind === 'pot');
+const PANS = indicesOf('stove').filter((i) => LEVEL.tiles[i]!.pot?.kind === 'pan');
 const PLATES = indicesOf('plates');
 const SERVE = indicesOf('serve');
 const TRASH = indicesOf('trash');
@@ -195,7 +198,9 @@ test('a fresh round has a stocked kitchen and one order', () => {
   const h = harness();
   assert.equal(h.snap.phase, 'playing');
   assert.equal(h.snap.orders.length, 1);
-  assert.ok(STOVES.length >= 1 && BOARDS.length >= 1 && CRATES.length === 3);
+  assert.ok(STOVES.length >= 1 && BOARDS.length >= 1);
+  const stocked = new Set(CRATES.map((i) => LEVEL.tiles[i]!.crate));
+  for (const veg of ['onion', 'tomato', 'mushroom']) assert.ok(stocked.has(veg as never));
 });
 
 test('crate gives a raw ingredient; a full hand takes nothing', () => {
@@ -900,4 +905,81 @@ test('restoreSnapshot round-trips the menu, a plate and a cooked pot', () => {
   plate.contents.push(done('tomato'));
   const source = wire.tiles[counter]!.item;
   assert.ok(source?.kind === 'plate' && source.contents.length === 1);
+});
+
+/* ------------------------------ frying pan ------------------------------ */
+
+test('the kitchen has a frying pan and a meat crate', () => {
+  assert.equal(PANS.length, 1);
+  assert.ok(STOVES.length >= 2);
+  assert.ok(LEVEL.tiles.some((t) => t.t === 'crate' && t.crate === 'meat'));
+});
+
+test('a pan fries one chopped patty and refuses everything else', () => {
+  const h = harness();
+  const pan = PANS[0]!;
+  const vessel = h.tile(pan).pot!;
+  const p = h.snap.players[0]!;
+  h.face(pan);
+
+  // Vegetables boil; they have no business in a skillet.
+  p.held = { kind: 'ingredient', ing: chopped('onion') };
+  h.a();
+  assert.equal(held(h)?.kind, 'ingredient', 'a pan does not boil');
+
+  // Raw meat has to be chopped first, exactly like everything else.
+  p.held = { kind: 'ingredient', ing: { type: 'meat', chopped: false, cooked: false } };
+  h.a();
+  assert.equal(held(h)?.kind, 'ingredient', 'an unchopped patty goes nowhere');
+
+  p.held = { kind: 'ingredient', ing: chopped('meat') };
+  h.a();
+  assert.equal(held(h), null);
+  assert.equal(vessel.contents.length, 1);
+  assert.equal(vessel.state, 'cooking');
+
+  // Capacity one: a second patty waits its turn.
+  p.held = { kind: 'ingredient', ing: chopped('meat') };
+  h.a();
+  assert.equal(held(h)?.kind, 'ingredient');
+  assert.equal(vessel.contents.length, 1);
+});
+
+test('a pan cooks in FRY_MS, then burns and ignites like a pot', () => {
+  const h = harness();
+  const pan = PANS[0]!;
+  const vessel = h.tile(pan).pot!;
+  vessel.contents = [chopped('meat')];
+  vessel.state = 'cooking';
+
+  h.run(FRY_MS * 0.8);
+  assert.equal(vessel.state, 'cooking', 'a patty is not done early');
+  h.run(FRY_MS * 0.3);
+  assert.equal(vessel.state, 'done');
+  assert.ok(vessel.contents[0]!.cooked);
+
+  h.run(BURN_MS + TICK_MS);
+  assert.equal(vessel.state, 'burnt');
+  h.run(FIRE_MS + TICK_MS);
+  assert.ok(h.tile(pan).fire, 'char left on a lit ring catches, pan or pot');
+});
+
+test('a pan travels like any other cookware', () => {
+  const h = harness();
+  const pan = PANS[0]!;
+  const counter = COUNTERS[0]!;
+  h.face(pan);
+  h.a();
+  const carried = held(h);
+  assert.ok(carried?.kind === 'pot' && carried.pot.kind === 'pan');
+  assert.equal(h.tile(pan).pot, null, 'the ring is left bare');
+
+  h.face(counter);
+  h.a();
+  const parked = h.tile(counter).item;
+  assert.ok(parked?.kind === 'pot' && parked.pot.kind === 'pan');
+  h.a();
+  h.face(pan);
+  h.a();
+  assert.equal(h.tile(pan).pot?.kind, 'pan', 'and the same pan goes back');
 });

@@ -246,7 +246,10 @@ async function runTake(browser: Browser, take: number): Promise<TakeResult> {
         }
         chopping = knives;
         s.tiles.forEach((t, i) => {
-          const full = t.pot?.state === 'cooking' && t.pot.contents.length >= 3;
+          // A vessel that just filled up: a pot of three, or a loaded pan.
+          const full =
+            t.pot?.state === 'cooking' &&
+            t.pot.contents.length >= (t.pot.kind === 'pan' ? 1 : 3);
           if (!full) {
             fullPots.delete(i);
             return;
