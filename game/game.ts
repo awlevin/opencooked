@@ -5,10 +5,23 @@
 // the returned buzz events to the right phones.
 
 import type { Btn } from '../shared/protocol';
+import {
+  DEFAULT_MENU,
+  DISHES,
+  INGREDIENTS,
+  assertMenuMakeable,
+  boilBatchOf,
+  canAddToPlate,
+  rawIngredient,
+  sameMultiset,
+  type DishId,
+  type KitchenCapabilities,
+} from '../shared/catalogue';
 import { createLevel } from '../shared/levels';
 import type {
   Fire,
   HeldItem,
+  Ingredient,
   IngredientType,
   Order,
   Phase,
@@ -29,9 +42,11 @@ import {
   EXTINGUISH_MS,
   FIRE_MS,
   FIRE_SPREAD_MS,
+  FRY_MS,
   MAX_ORDERS,
   ORDER_MS,
   ORDER_SPAWN_MS,
+  PAN_CAPACITY,
   PLAYER_RADIUS,
   PLAYER_SPEED,
   POT_CAPACITY,
@@ -61,8 +76,6 @@ const PLAYER_PUSH = 0.5;
 /** Button edges buffered between ticks, per button, per player. */
 const MAX_QUEUED_PRESSES = 4;
 
-const INGREDIENTS: readonly IngredientType[] = ['onion', 'tomato', 'mushroom'];
-
 /** Per-player state that is not part of the wire snapshot. */
 interface Runtime {
   s: PlayerState;
@@ -89,33 +102,30 @@ function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
 }
 
-/** Multiset equality on two ingredient lists (order-insensitive). */
-function sameMultiset(a: readonly IngredientType[], b: readonly IngredientType[]): boolean {
-  if (a.length !== b.length) return false;
-  const x = [...a].sort();
-  const y = [...b].sort();
-  for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;
-  return true;
-}
-
 function num(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;
 }
 
+function cloneIngredient(ing: Ingredient): Ingredient {
+  return { type: ing.type, chopped: ing.chopped === true, cooked: ing.cooked === true };
+}
+
 function clonePot(pot: Pot): Pot {
-  return { contents: [...pot.contents], cookMs: num(pot.cookMs), state: pot.state };
+  return {
+    kind: pot.kind === 'pan' ? 'pan' : 'pot',
+    contents: pot.contents.map(cloneIngredient),
+    cookMs: num(pot.cookMs),
+    state: pot.state,
+  };
 }
 
 function cloneItem(item: HeldItem | null | undefined): HeldItem | null {
   if (!item) return null;
   switch (item.kind) {
     case 'ingredient':
-      return {
-        kind: 'ingredient',
-        ing: { type: item.ing.type, chopped: item.ing.chopped === true },
-      };
+      return { kind: 'ingredient', ing: cloneIngredient(item.ing) };
     case 'plate':
-      return { kind: 'plate', soup: item.soup ? [...item.soup] : null };
+      return { kind: 'plate', contents: (item.contents ?? []).map(cloneIngredient) };
     case 'pot':
       return { kind: 'pot', pot: clonePot(item.pot) };
     case 'extinguisher':
@@ -155,6 +165,27 @@ function clonePlayer(p: PlayerState): PlayerState {
 export interface GameOptions {
   /** Seed the recipe RNG for reproducible runs (tests). */
   seed?: number;
+  /**
+   * The dishes this round's orders are drawn from. Every one of them must be
+   * cookable with the level's crates and stations, or the constructor throws.
+   */
+  menu?: DishId[];
+}
+
+/** What the level's stations can do — the input to the menu feasibility check. */
+function capabilitiesOf(tiles: readonly Tile[]): KitchenCapabilities {
+  const crates = new Set<IngredientType>();
+  let boards = 0;
+  let pots = 0;
+  let pans = 0;
+  for (const tile of tiles) {
+    if (tile.t === 'crate' && tile.crate) crates.add(tile.crate);
+    if (tile.t === 'board') boards++;
+    const vessel = tile.t === 'stove' ? tile.pot : tile.item?.kind === 'pot' ? tile.item.pot : null;
+    if (vessel?.kind === 'pan') pans++;
+    else if (vessel) pots++;
+  }
+  return { crates, boards, pots, pans };
 }
 
 export class Game {
@@ -166,10 +197,16 @@ export class Game {
   private spawns: Vec2[];
   private orderTimerMs = 0;
   private nextOrderId = 1;
+  /** The dishes orders are drawn from, and the plating rule's whole world. */
+  private readonly menu: DishId[];
 
   constructor(opts: GameOptions = {}) {
     this.rand = mulberry32(opts.seed ?? ((Math.random() * 0xffffffff) >>> 0));
     const level = createLevel();
+    this.menu = [...(opts.menu ?? DEFAULT_MENU)];
+    // Fail loudly at construction: an order nobody can cook is a level bug,
+    // and it is much cheaper to catch here than on the TV at −10 a ticket.
+    assertMenuMakeable(this.menu, capabilitiesOf(level.tiles));
     this.spawns = level.spawns;
     this.snapshot = {
       w: level.w,
@@ -182,6 +219,7 @@ export class Game {
       missed: 0,
       msLeft: ROUND_MS,
       phase: 'lobby',
+      dishes: [...this.menu],
     };
   }
 
@@ -219,6 +257,7 @@ export class Game {
     s.missed = 0;
     s.msLeft = ROUND_MS;
     s.phase = phase;
+    s.dishes = [...this.menu];
     this.orderTimerMs = 0;
     this.nextOrderId = 1;
 
@@ -267,6 +306,9 @@ export class Game {
     s.h = src.h;
     s.tiles = src.tiles.map(cloneTile);
     s.orders = src.orders.map((o) => ({ ...o, recipe: [...o.recipe] }));
+    // The menu is this Game's, not the checkpoint's: a resumed host runs the
+    // same level, and a snapshot from an older build may not carry one.
+    s.dishes = [...this.menu];
     s.score = num(src.score);
     s.served = num(src.served);
     s.missed = num(src.missed);
@@ -470,20 +512,13 @@ export class Game {
 
   // --- orders --------------------------------------------------------------
 
-  private randomRecipe(): IngredientType[] {
-    const recipe: IngredientType[] = [];
-    for (let i = 0; i < POT_CAPACITY; i++) {
-      recipe.push(INGREDIENTS[Math.floor(this.rand() * INGREDIENTS.length) % INGREDIENTS.length]);
-    }
-    recipe.sort();
-    return recipe;
-  }
-
   private spawnOrder(): void {
     if (this.snapshot.orders.length >= MAX_ORDERS) return;
+    const dish = this.menu[Math.floor(this.rand() * this.menu.length) % this.menu.length]!;
     const order: Order = {
       id: this.nextOrderId++,
-      recipe: this.randomRecipe(),
+      dish,
+      recipe: [...DISHES[dish].parts],
       msLeft: ORDER_MS,
       totalMs: ORDER_MS,
     };
@@ -522,12 +557,14 @@ export class Game {
       const pot = tile.pot;
       if (!pot) continue;
       if (pot.state === 'cooking') {
-        // Only a full pot actually cooks (COOK_MS is "full pot -> done").
-        if (pot.contents.length >= POT_CAPACITY) {
+        // Only a full vessel actually cooks: a batch is all-or-nothing.
+        if (pot.contents.length >= Game.batchOf(pot)) {
           pot.cookMs += dt;
-          if (pot.cookMs >= COOK_MS) {
+          if (pot.cookMs >= Game.cookTimeOf(pot)) {
             pot.state = 'done';
             pot.cookMs = 0;
+            // Cooking is what makes the contents ready to plate.
+            for (const ing of pot.contents) ing.cooked = true;
           }
         }
       } else if (pot.state === 'done') {
@@ -613,31 +650,78 @@ export class Game {
   }
 
   /**
+   * How many pieces this vessel needs before it starts, and therefore how many
+   * it holds. A pan takes one; a pot takes one batch of whatever is already in
+   * it (three vegetables, or a single portion of rice).
+   */
+  private static batchOf(pot: Pot): number {
+    if (pot.kind === 'pan') return PAN_CAPACITY;
+    const first = pot.contents[0];
+    return first ? boilBatchOf(first.type) : POT_CAPACITY;
+  }
+
+  private static cookTimeOf(pot: Pot): number {
+    return pot.kind === 'pan' ? FRY_MS : COOK_MS;
+  }
+
+  /**
+   * Whether this vessel will take that ingredient. The catalogue decides: a
+   * pot boils, a pan fries, and a pot only ever holds one batch size at once —
+   * which is what stops rice being stirred into a vegetable soup.
+   */
+  private static vesselAccepts(pot: Pot, ing: Ingredient): boolean {
+    if (pot.state === 'done' || pot.state === 'burnt') return false;
+    const def = INGREDIENTS[ing.type];
+    if (def.chop && !ing.chopped) return false;
+    if (ing.cooked) return false; // already cooked: nothing left to do to it
+    if (pot.kind === 'pan') {
+      return def.cook === 'fry' && pot.contents.length < PAN_CAPACITY;
+    }
+    if (def.cook !== 'boil') return false;
+    const first = pot.contents[0];
+    if (first && boilBatchOf(first.type) !== boilBatchOf(ing.type)) return false;
+    return pot.contents.length < boilBatchOf(ing.type);
+  }
+
+  /**
    * Put something into a pot, or take the soup out of it. Shared by stove
    * rings and pots sitting on a counter so both read identically to a player.
    */
-  private static usePot(
-    p: PlayerState,
-    pot: Pot,
-    held: HeldItem,
-    buzz: (ms: number) => void,
-  ): void {
+  private usePot(p: PlayerState, pot: Pot, held: HeldItem, buzz: (ms: number) => void): void {
     if (held.kind === 'ingredient') {
-      if (!held.ing.chopped) return;
-      if (pot.state === 'done' || pot.state === 'burnt') return;
-      if (pot.contents.length >= POT_CAPACITY) return;
-      pot.contents.push(held.ing.type);
+      if (!Game.vesselAccepts(pot, held.ing)) return;
+      pot.contents.push(held.ing);
       pot.state = 'cooking';
       p.held = null;
       buzz(BUZZ_PLACE);
       return;
     }
-    // Empty plate on a finished pot: scoop the soup.
-    if (held.kind !== 'plate' || held.soup !== null) return;
-    if (pot.state !== 'done') return;
-    held.soup = pot.contents.slice();
-    Game.emptyPot(pot);
+    // Plate on a finished vessel: tip the whole batch out onto it.
+    if (held.kind !== 'plate') return;
+    if (!this.pourInto(held.contents, pot)) return;
     buzz(BUZZ_PLACE);
+  }
+
+  /**
+   * Empty a finished vessel onto a plate. All or nothing: every piece has to
+   * be something the plate is allowed to take, so a pot of soup cannot be
+   * poured half-way onto a half-built burger.
+   */
+  private pourInto(contents: Ingredient[], pot: Pot): boolean {
+    if (pot.state !== 'done' || pot.contents.length === 0) return false;
+    const staged = [...contents];
+    for (const ing of pot.contents) {
+      if (!this.canPlate(staged, ing)) return false;
+      staged.push(ing);
+    }
+    contents.push(...pot.contents);
+    Game.emptyPot(pot);
+    return true;
+  }
+
+  /** The one plating rule, in terms of this round's menu. */
+  private canPlate(contents: readonly Ingredient[], ing: Ingredient): boolean {
+    return canAddToPlate(contents, ing, this.menu);
   }
 
   // --- tiles / targeting ---------------------------------------------------
@@ -671,14 +755,14 @@ export class Game {
     switch (tile.t) {
       case 'crate': {
         if (held || !tile.crate) return;
-        p.held = { kind: 'ingredient', ing: { type: tile.crate, chopped: false } };
+        p.held = { kind: 'ingredient', ing: rawIngredient(tile.crate) };
         buzz(BUZZ_PICKUP);
         return;
       }
 
       case 'plates': {
         if (held) return;
-        p.held = { kind: 'plate', soup: null };
+        p.held = { kind: 'plate', contents: [] };
         buzz(BUZZ_PICKUP);
         return;
       }
@@ -707,15 +791,13 @@ export class Game {
         }
         // A pot on a surface works like a stove's ring, minus the heat.
         if (surfacePot) {
-          Game.usePot(p, surfacePot, held, buzz);
+          this.usePot(p, surfacePot, held, buzz);
           return;
         }
-        // Pouring a finished pot onto a waiting plate: the soup moves, the pot
-        // stays in hand.
-        if (held.kind === 'pot' && item?.kind === 'plate' && item.soup === null) {
-          if (held.pot.state !== 'done') return;
-          item.soup = held.pot.contents.slice();
-          Game.emptyPot(held.pot);
+        // Pouring a finished vessel onto a waiting plate: the food moves, the
+        // cookware stays in hand.
+        if (held.kind === 'pot' && item?.kind === 'plate') {
+          if (!this.pourInto(item.contents, held.pot)) return;
           buzz(BUZZ_PLACE);
           return;
         }
@@ -750,13 +832,13 @@ export class Game {
           buzz(BUZZ_PICKUP);
           return;
         }
-        Game.usePot(p, pot, held, buzz);
+        this.usePot(p, pot, held, buzz);
         return;
       }
 
       case 'serve': {
-        if (!held || held.kind !== 'plate' || held.soup === null) return;
-        this.serve(held.soup);
+        if (!held || held.kind !== 'plate' || held.contents.length === 0) return;
+        this.serve(held.contents);
         p.held = null;
         buzz(BUZZ_SERVE);
         return;
@@ -777,8 +859,8 @@ export class Game {
           return;
         }
         if (held.kind !== 'plate') return; // the extinguisher is not rubbish
-        if (held.soup === null) return; // clean plate: nothing to bin
-        held.soup = null;
+        if (held.contents.length === 0) return; // clean plate: nothing to bin
+        held.contents = [];
         buzz(BUZZ_PLACE);
         return;
       }
@@ -805,10 +887,11 @@ export class Game {
     }
   }
 
-  /** Score a delivered soup against the order queue (earliest match wins). */
-  private serve(soup: IngredientType[]): void {
+  /** Score a delivered plate against the order queue (earliest match wins). */
+  private serve(contents: readonly Ingredient[]): void {
     const s = this.snapshot;
-    const i = s.orders.findIndex((o) => sameMultiset(o.recipe, soup));
+    const parts = contents.map((c) => c.type);
+    const i = s.orders.findIndex((o) => sameMultiset(o.recipe, parts));
     if (i < 0) return; // no matching order: plate consumed, 0 points
     const order = s.orders[i];
     const frac = order.totalMs > 0 ? clamp(order.msLeft / order.totalMs, 0, 1) : 0;

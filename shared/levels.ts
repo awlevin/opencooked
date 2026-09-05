@@ -6,7 +6,8 @@
 // [i - 0.5, i + 0.5] x [j - 0.5, j + 0.5]. Tiles are stored row-major, so
 // tile (x, y) lives at index y * w + x.
 
-import type { IngredientType, Tile, Vec2 } from './types';
+import type { IngredientType } from './catalogue';
+import type { Tile, Vec2 } from './types';
 
 export interface Level {
   w: number;
@@ -19,9 +20,13 @@ export interface Level {
  * ASCII source of truth for the kitchen.
  *
  *   .  floor           #  plain counter
- *   O  onion crate     T  tomato crate     M  mushroom crate
- *   B  cutting board   S  stove (pot)      P  plate stack
- *   W  serve window    X  trash            E  extinguisher mount
+ *   B  cutting board   S  stove (pot)      F  stove (frying pan)
+ *   P  plate stack     W  serve window     X  trash
+ *   E  extinguisher mount
+ *
+ * Crates (one raw ingredient each):
+ *   O  onion    T  tomato   M  mushroom    L  lettuce   C  cheese
+ *   U  bun      R  raw meat I  rice        H  fish      V  seaweed (nori)
  *
  * 13 x 8. Solid stations form the outer wall; a 5x2 island of counters and
  * two boards sits in the middle so players must route around each other.
@@ -54,6 +59,13 @@ const CRATE_OF: Record<string, IngredientType> = {
   O: 'onion',
   T: 'tomato',
   M: 'mushroom',
+  L: 'lettuce',
+  C: 'cheese',
+  U: 'bun',
+  R: 'meat',
+  I: 'rice',
+  H: 'fish',
+  V: 'seaweed',
 };
 
 function tileFromChar(ch: string): Tile {
@@ -65,7 +77,9 @@ function tileFromChar(ch: string): Tile {
     case 'B':
       return { t: 'board', item: null, chopMs: 0 };
     case 'S':
-      return { t: 'stove', pot: { contents: [], cookMs: 0, state: 'idle' } };
+      return { t: 'stove', pot: { kind: 'pot', contents: [], cookMs: 0, state: 'idle' } };
+    case 'F':
+      return { t: 'stove', pot: { kind: 'pan', contents: [], cookMs: 0, state: 'idle' } };
     case 'P':
       return { t: 'plates' };
     case 'W':
@@ -74,12 +88,11 @@ function tileFromChar(ch: string): Tile {
       return { t: 'trash' };
     case 'E':
       return { t: 'extinguisher', item: { kind: 'extinguisher' } };
-    case 'O':
-    case 'T':
-    case 'M':
-      return { t: 'crate', crate: CRATE_OF[ch] };
-    default:
+    default: {
+      const crate = CRATE_OF[ch];
+      if (crate) return { t: 'crate', crate };
       throw new Error(`levels: unknown tile character ${JSON.stringify(ch)}`);
+    }
   }
 }
 

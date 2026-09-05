@@ -2,11 +2,11 @@
 // Every tile is drawn inside a 0..1 unit box (the caller scales by tile size),
 // so line widths and radii are expressed as fractions of a tile.
 
+import { rawIngredient, type IngredientType } from '@/shared/catalogue';
 import {
   CHOP_MS,
   EXTINGUISH_MS,
   type Fire,
-  type IngredientType,
   type Snapshot,
   type Tile,
 } from '@/shared/types';
@@ -138,7 +138,7 @@ function drawCrate(c: CanvasRenderingContext2D, kind: IngredientType): void {
   c.lineTo(0.9, 0.28);
   c.stroke();
   // the goods, sitting proud of the box
-  drawHeldItem(c, { kind: 'ingredient', ing: { type: kind, chopped: false } }, 0.5, 0.48, 0.33);
+  drawHeldItem(c, { kind: 'ingredient', ing: rawIngredient(kind) }, 0.5, 0.48, 0.33);
 }
 
 function drawBoard(c: CanvasRenderingContext2D, tile: Tile): void {

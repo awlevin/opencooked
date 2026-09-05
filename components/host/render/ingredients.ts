@@ -7,6 +7,7 @@ import {
   COOK_MS,
   POT_CAPACITY,
   type HeldItem,
+  type Ingredient,
   type IngredientType,
   type Pot,
 } from '@/shared/types';
@@ -104,6 +105,13 @@ function drawWhole(
     return;
   }
 
+  if (type !== 'mushroom') {
+    // Placeholder until the render pass: a plain body in the catalogue colour.
+    circle(c, x, y, r * 0.9);
+    fillStroke(c, INGREDIENT_COLORS[type], ink, lw);
+    return;
+  }
+
   // mushroom
   const cap = INGREDIENT_COLORS.mushroom;
   // stem
@@ -187,8 +195,9 @@ export function drawPlate(
   x: number,
   y: number,
   r: number,
-  soup: IngredientType[] | null,
+  parts: Ingredient[] | null,
 ): void {
+  const soup = parts && parts.length > 0 ? parts.map((p) => p.type) : null;
   const lw = r * 0.14;
   ellipse(c, x, y, r, r * 0.8);
   fillStroke(c, PAL.plate, PAL.ink, lw);
@@ -301,14 +310,14 @@ export function drawPot(
 
   // contents
   if (pot.contents.length > 0) {
-    const col = burnt ? '#241d18' : soupColor(pot.contents);
+    const col = burnt ? '#241d18' : soupColor(pot.contents.map((i) => i.type));
     ellipse(c, 0, -0.19, 0.275, 0.088);
     fillStroke(c, col, shade(col, 0.4), OUT * 0.6);
     if (!burnt) {
       for (let i = 0; i < pot.contents.length; i++) {
         const a = (i / pot.contents.length) * Math.PI * 2 + time * 0.6;
         circle(c, Math.cos(a) * 0.125, -0.19 + Math.sin(a) * 0.036, 0.04);
-        c.fillStyle = tint(INGREDIENT_COLORS[pot.contents[i]!], 0.15);
+        c.fillStyle = tint(INGREDIENT_COLORS[pot.contents[i]!.type], 0.15);
         c.fill();
       }
     }
@@ -331,7 +340,7 @@ export function drawPot(
     const px = (i - (POT_CAPACITY - 1) / 2) * 0.15;
     circle(c, px, 0.43, 0.048);
     const ing = pot.contents[i];
-    fillStroke(c, ing ? INGREDIENT_COLORS[ing] : 'rgba(24,14,8,0.55)', PAL.ink, OUT * 0.65);
+    fillStroke(c, ing ? INGREDIENT_COLORS[ing.type] : 'rgba(24,14,8,0.55)', PAL.ink, OUT * 0.65);
   }
 
   // state feedback
@@ -459,7 +468,7 @@ export function drawHeldItem(
 ): void {
   switch (item.kind) {
     case 'plate':
-      drawPlate(c, x, y, r, item.soup);
+      drawPlate(c, x, y, r, item.contents);
       return;
     case 'ingredient':
       drawIngredient(c, item.ing, x, y, r * 0.86);

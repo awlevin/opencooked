@@ -8,8 +8,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+import { DISHES, type IngredientType } from '../shared/catalogue';
 import { createLevel } from '../shared/levels';
-import type { IngredientType, Snapshot, Tile, TileType } from '../shared/types';
+import type { Ingredient, Pot, Snapshot, Tile, TileType } from '../shared/types';
 import {
   BURN_MS,
   CHOP_MS,
@@ -17,6 +18,7 @@ import {
   EXTINGUISH_MS,
   FIRE_MS,
   FIRE_SPREAD_MS,
+  ORDER_SPAWN_MS,
   POT_CAPACITY,
   TICK_MS,
 } from '../shared/types';
@@ -161,11 +163,28 @@ function faceCorner(h: Harness, idx: number, id: string): void {
 
 const held = (h: Harness, id = 'p0') => h.snap.players.find((p) => p.id === id)!.held;
 
+/** A prepared ingredient, ready for a pot (chopped, not yet cooked). */
+const chopped = (type: IngredientType): Ingredient => ({ type, chopped: true, cooked: false });
+
+/** A finished ingredient, ready for a plate. */
+const done = (type: IngredientType): Ingredient => ({ type, chopped: true, cooked: true });
+
+/** Cheat a vessel to 'done', exactly as a tick would: contents cooked too. */
+function finish(pot: Pot): void {
+  pot.state = 'done';
+  pot.cookMs = 0;
+  for (const ing of pot.contents) ing.cooked = true;
+}
+
+/** The types on a plate / in a pot, sorted — what the rules actually compare. */
+const partsOf = (list: readonly Ingredient[]): IngredientType[] =>
+  list.map((i) => i.type).sort();
+
 /** Drop `n` chopped ingredients of one type straight into a stove pot. */
 function fillPot(h: Harness, stove: number, type: IngredientType = 'onion', n = POT_CAPACITY): void {
   const pot = h.tile(stove).pot;
   assert.ok(pot);
-  for (let i = 0; i < n; i++) pot.contents.push(type);
+  for (let i = 0; i < n; i++) pot.contents.push(chopped(type));
   pot.state = 'cooking';
   pot.cookMs = 0;
 }
@@ -229,7 +248,7 @@ test('pot cooks only when full, then burns if ignored', () => {
   h.run(COOK_MS * 2);
   assert.equal(pot.state, 'cooking', 'a half-full pot never finishes');
 
-  pot.contents.push('onion');
+  pot.contents.push(chopped('onion'));
   h.run(COOK_MS + TICK_MS);
   assert.equal(pot.state, 'done');
   h.run(BURN_MS + TICK_MS);
@@ -241,7 +260,7 @@ test('plate fills from a done pot and serves a matching order', () => {
   const recipe = h.snap.orders[0]!.recipe;
   const stove = STOVES[0]!;
   const pot = h.tile(stove).pot!;
-  pot.contents = [...recipe];
+  pot.contents = recipe.map(done);
   pot.state = 'done';
   pot.cookMs = 0;
 
@@ -251,7 +270,7 @@ test('plate fills from a done pot and serves a matching order', () => {
   h.face(stove);
   h.a();
   const plate = held(h);
-  assert.ok(plate?.kind === 'plate' && plate.soup?.length === POT_CAPACITY);
+  assert.ok(plate?.kind === 'plate' && plate.contents.length === POT_CAPACITY);
   assert.equal(pot.state, 'idle');
   assert.equal(pot.contents.length, 0);
 
@@ -268,17 +287,17 @@ test('trash empties a soup plate but keeps the plate', () => {
   h.a();
   const plate = held(h);
   assert.ok(plate?.kind === 'plate');
-  plate.soup = ['onion', 'onion', 'onion'];
+  plate.contents = [done('onion'), done('onion'), done('onion')];
   h.face(TRASH[0]!);
   h.a();
   const after = held(h);
-  assert.ok(after?.kind === 'plate' && after.soup === null);
+  assert.ok(after?.kind === 'plate' && after.contents.length === 0);
 });
 
 test('an empty-handed chef dumps a burnt stove pot', () => {
   const h = harness();
   const pot = h.tile(STOVES[0]!).pot!;
-  pot.contents = ['onion', 'onion', 'onion'];
+  pot.contents = [done('onion'), done('onion'), done('onion')];
   pot.state = 'burnt';
   h.face(STOVES[0]!);
   h.a();
@@ -316,7 +335,7 @@ test('restoreSnapshot round-trips a mid-round kitchen', () => {
     { ...wire, players: wire.players.map((p) => ({ ...p, chopping: false })) },
   );
   // Deep copy, not aliasing: mutating the restore must not touch the source.
-  g2.snapshot.tiles[STOVES[0]!]!.pot!.contents.push('tomato');
+  g2.snapshot.tiles[STOVES[0]!]!.pot!.contents.push(chopped('tomato'));
   assert.equal(wire.tiles[STOVES[0]!]!.pot!.contents.length, POT_CAPACITY);
 });
 
@@ -417,14 +436,13 @@ test('a counter pot takes chopped ingredients and fills a plate', () => {
   assert.equal(item.pot.state, 'cooking');
 
   // Nothing cooks off the ring, so cheat it to done and scoop it out.
-  item.pot.state = 'done';
-  item.pot.cookMs = 0;
+  finish(item.pot);
   h.face(PLATES[0]!);
   h.a();
   h.face(counter);
   h.a();
   const plate = held(h);
-  assert.ok(plate?.kind === 'plate' && plate.soup?.length === POT_CAPACITY);
+  assert.ok(plate?.kind === 'plate' && plate.contents.length === POT_CAPACITY);
   assert.equal(item.pot.state, 'idle');
   assert.equal(item.pot.contents.length, 0);
 });
@@ -450,21 +468,21 @@ test('a full pot in hand refuses more and pours into a waiting plate', () => {
   h.face(counter);
   h.a();
   const plate = h.tile(counter).item;
-  assert.ok(plate?.kind === 'plate' && plate.soup?.length === POT_CAPACITY);
+  assert.ok(plate?.kind === 'plate' && plate.contents.length === POT_CAPACITY);
   assert.equal(carried.pot.state, 'idle');
   assert.equal(carried.pot.contents.length, 0);
   assert.equal(held(h), carried, 'the pot stays in your hands');
 
   // A second pour has nothing to give, so the plate keeps its soup.
   h.a();
-  assert.equal(plate.soup?.length, POT_CAPACITY);
+  assert.equal(plate.contents.length, POT_CAPACITY);
 });
 
 test('trash tips a pot out and hands it straight back', () => {
   const h = harness();
   const stove = STOVES[0]!;
   const pot = h.tile(stove).pot!;
-  pot.contents = ['onion', 'tomato'];
+  pot.contents = [chopped('onion'), chopped('tomato')];
   pot.state = 'cooking';
   h.face(stove);
   h.a();
@@ -481,12 +499,12 @@ test('a burnt pot on a counter is dumped before it can be carried', () => {
   const counter = COUNTERS[0]!;
   const stove = STOVES[0]!;
   const pot = h.tile(stove).pot!;
-  pot.contents = ['onion', 'onion', 'onion'];
+  pot.contents = [done('onion'), done('onion'), done('onion')];
   pot.state = 'burnt';
   h.face(stove);
   h.a(); // burnt pot on a ring: dump first
   assert.equal(pot.state, 'idle');
-  pot.contents = ['onion', 'onion', 'onion'];
+  pot.contents = [done('onion'), done('onion'), done('onion')];
   pot.state = 'burnt';
 
   // Move the (burnt) pot by hand: dump, lift, carry, and burn it on the counter.
@@ -496,7 +514,7 @@ test('a burnt pot on a counter is dumped before it can be carried', () => {
   h.a();
   const item = h.tile(counter).item;
   assert.ok(item?.kind === 'pot');
-  item.pot.contents = ['onion', 'onion', 'onion'];
+  item.pot.contents = [done('onion'), done('onion'), done('onion')];
   item.pot.state = 'burnt';
 
   h.a();
@@ -529,8 +547,8 @@ test('restoreSnapshot round-trips a carried pot and a bare ring', () => {
   assert.equal(g2.snapshot.tiles[stove]!.pot, null, 'the empty ring survives');
   const restored = g2.snapshot.players[0]!.held;
   assert.ok(restored?.kind === 'pot');
-  assert.deepEqual(restored.pot.contents, ['tomato', 'tomato']);
-  restored.pot.contents.push('onion');
+  assert.deepEqual(partsOf(restored.pot.contents), ['tomato', 'tomato']);
+  restored.pot.contents.push(chopped('onion'));
   const source = wire.players[0]!.held;
   assert.ok(source?.kind === 'pot' && source.pot.contents.length === 2);
 });
@@ -550,7 +568,7 @@ const igniteTile = (h: Harness, idx: number): void =>
 /** Leave a burnt pot on a ring and wait for it to catch. */
 function ignite(h: Harness, stove: number): void {
   const pot = h.tile(stove).pot!;
-  pot.contents = ['onion', 'onion', 'onion'];
+  pot.contents = [done('onion'), done('onion'), done('onion')];
   pot.state = 'burnt';
   pot.cookMs = 0;
   h.run(FIRE_MS + TICK_MS);
@@ -566,7 +584,7 @@ test('a burnt pot on its ring catches fire, and not a moment early', () => {
   const h = harness();
   const stove = STOVES[0]!;
   const pot = h.tile(stove).pot!;
-  pot.contents = ['onion', 'onion', 'onion'];
+  pot.contents = [done('onion'), done('onion'), done('onion')];
   pot.state = 'burnt';
   pot.cookMs = 0;
   h.run(FIRE_MS * 0.8);
@@ -580,7 +598,7 @@ test('a burnt pot off the heat never catches', () => {
   const h = harness();
   const stove = STOVES[0]!;
   const pot = h.tile(stove).pot!;
-  pot.contents = ['onion'];
+  pot.contents = [chopped('onion')];
   pot.state = 'burnt';
   // Carry the char around: the ignition clock is the ring's, not the pot's.
   h.face(stove);
@@ -589,7 +607,7 @@ test('a burnt pot off the heat never catches', () => {
   const carried = held(h);
   assert.ok(carried?.kind === 'pot');
   carried.pot.state = 'burnt';
-  carried.pot.contents = ['onion'];
+  carried.pot.contents = [chopped('onion')];
   h.run(FIRE_MS * 3);
   assert.equal(h.snap.tiles.filter((t) => t.fire).length, 0);
 });
@@ -621,7 +639,7 @@ test('catching fire ruins food but never the equipment', () => {
   h.a();
   const potItem = h.tile(counter).item;
   assert.ok(potItem?.kind === 'pot');
-  potItem.pot.contents = ['onion', 'tomato'];
+  potItem.pot.contents = [chopped('onion'), chopped('tomato')];
   potItem.pot.state = 'cooking';
   h.face(PLATES[0]!);
   h.a();
@@ -631,7 +649,7 @@ test('catching fire ruins food but never the equipment', () => {
   igniteTile(h, counter);
   igniteTile(h, plateCounter);
   assert.equal(potItem.pot.state, 'burnt', 'the pot survives, its soup does not');
-  assert.deepEqual(potItem.pot.contents, ['onion', 'tomato']);
+  assert.deepEqual(partsOf(potItem.pot.contents), ['onion', 'tomato']);
   assert.equal(h.tile(counter).item, potItem);
   assert.equal(h.tile(plateCounter).item, null, 'the plate is gone');
 });
@@ -779,4 +797,107 @@ test('a chef who leaves hangs the extinguisher back up', () => {
   assert.equal(h.snap.players.find((p) => p.id === 'p1')!.held?.kind, 'extinguisher');
   h.g.removePlayer('p1');
   assert.equal(h.tile(MOUNT).item?.kind, 'extinguisher');
+});
+
+/* -------------------------- catalogue and menu -------------------------- */
+
+test('every order is a dish on the menu, with that dish\'s parts', () => {
+  const h = harness();
+  h.run(ORDER_SPAWN_MS * 3);
+  assert.ok(h.snap.orders.length >= 2);
+  assert.ok(h.snap.dishes.length > 0);
+  for (const o of h.snap.orders) {
+    assert.ok(h.snap.dishes.includes(o.dish), `${o.dish} is not on the menu`);
+    assert.deepEqual(o.recipe, DISHES[o.dish].parts);
+  }
+});
+
+test('a menu the kitchen cannot cook refuses to start', () => {
+  // The starter kitchen has no rice, fish or seaweed crates.
+  assert.throws(() => new Game({ seed: 1, menu: ['nigiri'] }), /Fish crate/);
+  assert.throws(() => new Game({ seed: 1, menu: [] }), /at least one dish/);
+  // And a dish it can cook is accepted.
+  assert.doesNotThrow(() => new Game({ seed: 1, menu: ['onion-soup'] }));
+});
+
+test('a pot boils one batch size at a time: rice is a single portion', () => {
+  const h = harness();
+  const stove = STOVES[0]!;
+  const pot = h.tile(stove).pot!;
+  const p = h.snap.players[0]!;
+
+  p.held = { kind: 'ingredient', ing: { type: 'rice', chopped: false, cooked: false } };
+  h.face(stove);
+  h.a();
+  assert.equal(p.held, null, 'rice needs no chopping to go in');
+  assert.equal(pot.contents.length, 1);
+  assert.equal(pot.state, 'cooking');
+
+  // A second portion has nowhere to go: rice boils one at a time.
+  p.held = { kind: 'ingredient', ing: { type: 'rice', chopped: false, cooked: false } };
+  h.a();
+  assert.equal(held(h)?.kind, 'ingredient', 'the pot is already a full batch');
+
+  h.run(COOK_MS + TICK_MS);
+  assert.equal(pot.state, 'done');
+  assert.ok(pot.contents.every((i) => i.cooked), 'cooking is what marks it ready');
+});
+
+test('a pot of rice refuses a vegetable, and vice versa', () => {
+  const h = harness();
+  const stove = STOVES[0]!;
+  const pot = h.tile(stove).pot!;
+  const p = h.snap.players[0]!;
+  h.face(stove);
+
+  pot.contents = [{ type: 'rice', chopped: false, cooked: false }];
+  pot.state = 'cooking';
+  p.held = { kind: 'ingredient', ing: chopped('onion') };
+  h.a();
+  assert.equal(held(h)?.kind, 'ingredient', 'no onions in the rice');
+
+  pot.contents = [chopped('onion')];
+  p.held = { kind: 'ingredient', ing: { type: 'rice', chopped: false, cooked: false } };
+  h.a();
+  assert.equal(held(h)?.kind, 'ingredient', 'and no rice in the soup');
+});
+
+test('an unchopped or already-cooked ingredient goes in no pot', () => {
+  const h = harness();
+  const stove = STOVES[0]!;
+  const pot = h.tile(stove).pot!;
+  const p = h.snap.players[0]!;
+  h.face(stove);
+
+  p.held = { kind: 'ingredient', ing: { type: 'onion', chopped: false, cooked: false } };
+  h.a();
+  assert.equal(held(h)?.kind, 'ingredient');
+  p.held = { kind: 'ingredient', ing: done('onion') };
+  h.a();
+  assert.equal(held(h)?.kind, 'ingredient');
+  assert.equal(pot.contents.length, 0);
+});
+
+test('restoreSnapshot round-trips the menu, a plate and a cooked pot', () => {
+  const h = harness();
+  const stove = STOVES[0]!;
+  const counter = COUNTERS[0]!;
+  const pot = h.tile(stove).pot!;
+  pot.contents = [done('onion'), done('tomato'), done('mushroom')];
+  pot.state = 'done';
+  h.tile(counter).item = { kind: 'plate', contents: [done('onion')] };
+
+  const wire = JSON.parse(JSON.stringify(h.snap)) as Snapshot;
+  const g2 = new Game({ seed: 7 });
+  g2.restoreSnapshot(wire);
+  assert.deepEqual(g2.snapshot.dishes, h.snap.dishes);
+  const restoredPot = g2.snapshot.tiles[stove]!.pot!;
+  assert.deepEqual(partsOf(restoredPot.contents), ['mushroom', 'onion', 'tomato']);
+  assert.ok(restoredPot.contents.every((i) => i.cooked));
+  const plate = g2.snapshot.tiles[counter]!.item;
+  assert.ok(plate?.kind === 'plate' && plate.contents.length === 1);
+  // Deep copy, not aliasing.
+  plate.contents.push(done('tomato'));
+  const source = wire.tiles[counter]!.item;
+  assert.ok(source?.kind === 'plate' && source.contents.length === 1);
 });

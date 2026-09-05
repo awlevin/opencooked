@@ -230,7 +230,7 @@ const tileAt = (s: Snapshot, i: number): Tile | undefined => s.tiles[i];
 function describeHeld(item: HeldItem): string {
   switch (item.kind) {
     case 'plate':
-      return item.soup ? 'soup' : 'plate';
+      return item.contents.length > 0 ? 'dish' : 'plate';
     case 'pot':
       return `pot:${item.pot.state}`;
     case 'extinguisher':
@@ -659,7 +659,7 @@ export class BotTeam {
     const inflight = this.bots
       .filter((b) => b !== ignore && b.reserve?.stoveIdx === stoveIdx)
       .map((b) => b.reserve!.type);
-    return multisetDiff(recipe, [...pot.contents, ...inflight]);
+    return multisetDiff(recipe, [...pot.contents.map((i) => i.type), ...inflight]);
   }
 
   /* ----------------------------- assignment ------------------------------ */
@@ -721,7 +721,7 @@ export class BotTeam {
     // --- carrying something: finish what it is for ---
     if (held) {
       if (held.kind === 'plate') {
-        if (held.soup !== null) {
+        if (held.contents.length > 0) {
           bot.label = 'serve';
           return this.serveTask(bot);
         }
@@ -1009,7 +1009,7 @@ export class BotTeam {
     yield {
       k: 'useA',
       at: stove,
-      done: (c) => c.me.held?.kind === 'plate' && c.me.held.soup !== null,
+      done: (c) => c.me.held?.kind === 'plate' && c.me.held.contents.length > 0,
       timeoutMs: 5000,
     };
     bot.serveStove = null;

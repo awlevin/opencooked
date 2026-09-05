@@ -1,6 +1,8 @@
 // Shared art direction: palette, drawing primitives, easing helpers.
 // Everything is drawn with paths — no images, no external assets.
 
+import { INGREDIENTS, type IngredientType } from '@/shared/catalogue';
+
 export const PAL = {
   ink: '#3b2314',
   inkSoft: '#6b4526',
@@ -49,11 +51,18 @@ export const PAL = {
   hudEdge: '#ffd23f',
 } as const;
 
-export const INGREDIENT_COLORS = {
-  onion: '#f2e2b4',
-  tomato: '#e8503a',
-  mushroom: '#b4784f',
-} as const;
+/**
+ * Body colours, straight from the catalogue: the sim owns what an ingredient
+ * looks like so a new ingredient never needs a second table here.
+ */
+export const INGREDIENT_COLORS: Record<IngredientType, string> = Object.fromEntries(
+  Object.values(INGREDIENTS).map((d) => [d.id, d.color]),
+) as Record<IngredientType, string>;
+
+/** Secondary colour (sprout, rind, grill marks) for the same ingredient. */
+export const INGREDIENT_ACCENTS: Record<IngredientType, string> = Object.fromEntries(
+  Object.values(INGREDIENTS).map((d) => [d.id, d.accent]),
+) as Record<IngredientType, string>;
 
 /**
  * Canvas font stack. `next/font` hashes the family name at build time, so the

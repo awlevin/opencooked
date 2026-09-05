@@ -6,19 +6,25 @@ export interface Vec2 {
   y: number;
 }
 
-export type IngredientType = 'onion' | 'tomato' | 'mushroom';
+// The ingredient and dish catalogue is the data half of the contract; it
+// lives in shared/catalogue.ts so pure food data stays free of wire shapes.
+export type { DishId, IngredientType } from './catalogue';
+import type { DishId, IngredientType } from './catalogue';
 
+/** One physical piece of food, plus everything that has been done to it. */
 export interface Ingredient {
   type: IngredientType;
   chopped: boolean;
+  cooked: boolean;
 }
 
 export type HeldItem =
   | { kind: 'ingredient'; ing: Ingredient }
-  // soup: null = empty plate; array = cooked soup contents on the plate
-  | { kind: 'plate'; soup: IngredientType[] | null }
-  // A pot off its ring. Its timers only run while it sits on a stove, so a
-  // carried pot is frozen wherever its cooking got to.
+  // A plate. `contents` empty = clean plate; otherwise the parts plated so
+  // far, in the order they were added.
+  | { kind: 'plate'; contents: Ingredient[] }
+  // A pot or pan off its ring. Its timers only run while it sits on a stove,
+  // so carried cookware is frozen wherever its cooking got to.
   | { kind: 'pot'; pot: Pot }
   | { kind: 'extinguisher' };
 
@@ -35,8 +41,14 @@ export type TileType =
 
 export type PotState = 'idle' | 'cooking' | 'done' | 'burnt';
 
+/**
+ * A cooking vessel. Both kinds behave identically to a player — things go in,
+ * a plate takes what comes out — they differ only in what they accept and how
+ * much: a pot boils a batch (3 vegetables, or 1 rice), a pan fries one patty.
+ */
 export interface Pot {
-  contents: IngredientType[]; // chopped ingredients, max POT_CAPACITY
+  kind: 'pot' | 'pan';
+  contents: Ingredient[]; // prepared ingredients, at most one batch
   cookMs: number; // elapsed cooking (or burning) time
   state: PotState;
 }
@@ -72,7 +84,8 @@ export interface PlayerState {
 
 export interface Order {
   id: number;
-  recipe: IngredientType[]; // sorted; soup = these 3 chopped + cooked
+  dish: DishId; // ticket title; the recipe below is DISHES[dish].parts
+  recipe: IngredientType[]; // sorted multiset of the dish's parts
   msLeft: number;
   totalMs: number;
 }
@@ -90,6 +103,7 @@ export interface Snapshot {
   missed: number; // expired orders
   msLeft: number; // round time remaining
   phase: Phase;
+  dishes: DishId[]; // this level's menu: the dishes orders are drawn from
 }
 
 export interface LobbyPlayer {
@@ -103,8 +117,10 @@ export const TICK_MS = 33; // ~30 Hz simulation
 export const SNAPSHOT_MS = 50; // ~20 Hz broadcast to host
 export const CHOP_MS = 1500;
 export const COOK_MS = 8000; // full pot -> done
+export const FRY_MS = 5000; // full pan -> done (one patty is quicker than a pot)
 export const BURN_MS = 10000; // time after 'done' before 'burnt'
-export const POT_CAPACITY = 3;
+export const POT_CAPACITY = 3; // slots in a pot: the largest boil batch
+export const PAN_CAPACITY = 1; // a skillet holds one thing at a time
 export const FIRE_MS = 8000; // a burnt pot left on its ring this long ignites
 export const FIRE_SPREAD_MS = 12_000; // a burning tile lights a neighbour this often
 export const EXTINGUISH_MS = 1200; // foam needed to put one tile out
