@@ -27,7 +27,13 @@ import { Game } from './game';
 
 /* ------------------------------- harness -------------------------------- */
 
-const LEVEL = createLevel();
+/**
+ * The kitchen these tests cook in. Home Kitchen 3 is the one level that runs
+ * pots and a pan side by side off six crates, so every rule in the book —
+ * boiling, frying, plating a burger — can be driven in one geometry.
+ */
+const TEST_LEVEL_ID = 'home-3';
+const LEVEL = createLevel(TEST_LEVEL_ID);
 
 /** Every tile index of one type, in reading order. */
 function indicesOf(t: TileType): number[] {
@@ -77,7 +83,7 @@ interface Harness {
 }
 
 function harness(players = 1, seed = 7, menu?: DishId[]): Harness {
-  const g = new Game({ seed, menu });
+  const g = new Game({ seed, menu, levelId: TEST_LEVEL_ID });
   for (let i = 0; i < players; i++) g.addPlayer(`p${i}`, `P${i}`, '#fff');
   g.start();
   const snap = g.snapshot;
@@ -339,7 +345,7 @@ test('restoreSnapshot round-trips a mid-round kitchen', () => {
   h.run(1000);
 
   const wire = JSON.parse(JSON.stringify(h.snap)) as Snapshot;
-  const g2 = new Game({ seed: 7 });
+  const g2 = new Game({ seed: 7, levelId: TEST_LEVEL_ID });
   g2.restoreSnapshot(wire);
   // Player input state is deliberately not restored, so compare the rest.
   assert.deepEqual(
@@ -554,7 +560,7 @@ test('restoreSnapshot round-trips a carried pot and a bare ring', () => {
   h.a();
 
   const wire = JSON.parse(JSON.stringify(h.snap)) as Snapshot;
-  const g2 = new Game({ seed: 7 });
+  const g2 = new Game({ seed: 7, levelId: TEST_LEVEL_ID });
   g2.restoreSnapshot(wire);
   assert.equal(g2.snapshot.tiles[stove]!.pot, null, 'the empty ring survives');
   const restored = g2.snapshot.players[0]!.held;
@@ -787,7 +793,7 @@ test('restoreSnapshot round-trips fire and the extinguisher', () => {
   h.tile(stove).fire!.sprayMs = 400;
 
   const wire = JSON.parse(JSON.stringify(h.snap)) as Snapshot;
-  const g2 = new Game({ seed: 7 });
+  const g2 = new Game({ seed: 7, levelId: TEST_LEVEL_ID });
   g2.restoreSnapshot(wire);
   assert.deepEqual(g2.snapshot.tiles[stove]!.fire, h.tile(stove).fire);
   assert.equal(g2.snapshot.tiles[MOUNT]!.item, null);
@@ -826,10 +832,10 @@ test('every order is a dish on the menu, with that dish\'s parts', () => {
 
 test('a menu the kitchen cannot cook refuses to start', () => {
   // The starter kitchen has no rice, fish or seaweed crates.
-  assert.throws(() => new Game({ seed: 1, menu: ['nigiri'] }), /Fish crate/);
-  assert.throws(() => new Game({ seed: 1, menu: [] }), /at least one dish/);
+  assert.throws(() => new Game({ seed: 1, menu: ['nigiri'], levelId: TEST_LEVEL_ID }), /Fish crate/);
+  assert.throws(() => new Game({ seed: 1, menu: [], levelId: TEST_LEVEL_ID }), /at least one dish/);
   // And a dish it can cook is accepted.
-  assert.doesNotThrow(() => new Game({ seed: 1, menu: ['onion-soup'] }));
+  assert.doesNotThrow(() => new Game({ seed: 1, menu: ['onion-soup'], levelId: TEST_LEVEL_ID }));
 });
 
 test('a pot boils one batch size at a time: rice is a single portion', () => {
@@ -900,7 +906,7 @@ test('restoreSnapshot round-trips the menu, a plate and a cooked pot', () => {
   h.tile(counter).item = { kind: 'plate', contents: [done('onion')] };
 
   const wire = JSON.parse(JSON.stringify(h.snap)) as Snapshot;
-  const g2 = new Game({ seed: 7 });
+  const g2 = new Game({ seed: 7, levelId: TEST_LEVEL_ID });
   g2.restoreSnapshot(wire);
   assert.deepEqual(g2.snapshot.dishes, h.snap.dishes);
   const restoredPot = g2.snapshot.tiles[stove]!.pot!;

@@ -17,14 +17,16 @@ import WebSocket from 'ws';
 
 import type { Btn, C2S, S2C } from '../shared/protocol';
 import { LOCAL_PORT, WS_PATH } from '../shared/protocol';
-import { createLevel } from '../shared/levels';
+import { DEFAULT_LEVEL_ID, createLevel } from '../shared/levels';
 import { DISHES, dishesOfCourse } from '../shared/catalogue';
 import type { HeldItem, IngredientType, PlayerState, Snapshot, Tile, Vec2 } from '../shared/types';
 import { COOK_MS, POT_CAPACITY } from '../shared/types';
 
 /* ============================ level geometry ============================= */
 
-const LEVEL = createLevel();
+// The bots cook the default level: it is what a fresh room opens on, and what
+// `npm run smoke` and the demo capture both drive.
+const LEVEL = createLevel(DEFAULT_LEVEL_ID);
 const W = LEVEL.w;
 const H = LEVEL.h;
 const WALK: boolean[] = LEVEL.tiles.map((t) => t.t === 'floor');
@@ -203,10 +205,11 @@ const EXT_MOUNT: Access | null = accessOf(stationsOfType('extinguisher')[0] ?? {
  * nearest the stoves first — a staged ingredient turns a 15 s round trip into
  * a two-tile walk.
  */
+const STAGE_ANCHOR: Vec2 = (STOVES[0] ?? SERVE).stand;
 const STAGE_COUNTERS: Access[] = stationsOfType('counter')
   .map(accessOf)
   .filter((a): a is Access => a !== null)
-  .sort((a, b) => walkDist(a.stand, STOVES[0].stand) - walkDist(b.stand, STOVES[0].stand))
+  .sort((a, b) => walkDist(a.stand, STAGE_ANCHOR) - walkDist(b.stand, STAGE_ANCHOR))
   .slice(0, 6);
 
 /* ============================== small utils ============================== */
@@ -216,11 +219,12 @@ const ZERO: Vec2 = { x: 0, y: 0 };
 /**
  * The bots cook soup and nothing else: one pot, three chopped vegetables, a
  * plate, the window. Every vegetable any soup on the books calls for, taken
- * from the catalogue so a new soup needs no edit here.
+ * from the catalogue so a new soup needs no edit here — minus anything this
+ * level does not stock, since a level's crates are its own business.
  */
 const INGREDIENTS: readonly IngredientType[] = [
   ...new Set(dishesOfCourse('soup').flatMap((id) => DISHES[id].parts)),
-];
+].filter((type) => CRATES[type] !== undefined);
 
 /** `need` minus `have`, treating both as multisets. */
 function multisetDiff(need: readonly IngredientType[], have: readonly IngredientType[]): IngredientType[] {

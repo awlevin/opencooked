@@ -104,6 +104,10 @@ export interface Snapshot {
   msLeft: number; // round time remaining
   phase: Phase;
   dishes: DishId[]; // this level's menu: the dishes orders are drawn from
+  // Which kitchen this is. The renderer resolves the world's theme from
+  // `worldId`; a resumed host rebuilds spawns and tuning from `levelId`.
+  levelId: string;
+  worldId: string;
 }
 
 export interface LobbyPlayer {

@@ -6,7 +6,6 @@
 
 import type { Btn } from '../shared/protocol';
 import {
-  DEFAULT_MENU,
   DISHES,
   INGREDIENTS,
   assertMenuMakeable,
@@ -15,14 +14,13 @@ import {
   rawIngredient,
   sameMultiset,
   type DishId,
-  type KitchenCapabilities,
 } from '../shared/catalogue';
-import { createLevel } from '../shared/levels';
+import type { Level } from '../shared/levels';
+import { DEFAULT_LEVEL_ID, capabilitiesOf, createLevel, isLevelId } from '../shared/levels';
 import type {
   Fire,
   HeldItem,
   Ingredient,
-  IngredientType,
   Order,
   Phase,
   PlayerState,
@@ -43,14 +41,10 @@ import {
   FIRE_MS,
   FIRE_SPREAD_MS,
   FRY_MS,
-  MAX_ORDERS,
-  ORDER_MS,
-  ORDER_SPAWN_MS,
   PAN_CAPACITY,
   PLAYER_RADIUS,
   PLAYER_SPEED,
   POT_CAPACITY,
-  ROUND_MS,
   SERVE_POINTS,
   SERVE_TIME_BONUS_MAX,
 } from '../shared/types';
@@ -165,27 +159,14 @@ function clonePlayer(p: PlayerState): PlayerState {
 export interface GameOptions {
   /** Seed the recipe RNG for reproducible runs (tests). */
   seed?: number;
+  /** Which kitchen to cook in. Unknown ids fall back to the default level. */
+  levelId?: string;
   /**
-   * The dishes this round's orders are drawn from. Every one of them must be
-   * cookable with the level's crates and stations, or the constructor throws.
+   * Override the level's own menu. Every dish must still be cookable with the
+   * level's crates and stations, or the constructor throws. Tests use this to
+   * pin one dish; normal play never passes it — a level owns its menu.
    */
   menu?: DishId[];
-}
-
-/** What the level's stations can do — the input to the menu feasibility check. */
-function capabilitiesOf(tiles: readonly Tile[]): KitchenCapabilities {
-  const crates = new Set<IngredientType>();
-  let boards = 0;
-  let pots = 0;
-  let pans = 0;
-  for (const tile of tiles) {
-    if (tile.t === 'crate' && tile.crate) crates.add(tile.crate);
-    if (tile.t === 'board') boards++;
-    const vessel = tile.t === 'stove' ? tile.pot : tile.item?.kind === 'pot' ? tile.item.pot : null;
-    if (vessel?.kind === 'pan') pans++;
-    else if (vessel) pots++;
-  }
-  return { crates, boards, pots, pans };
 }
 
 export class Game {
@@ -198,15 +179,19 @@ export class Game {
   private orderTimerMs = 0;
   private nextOrderId = 1;
   /** The dishes orders are drawn from, and the plating rule's whole world. */
-  private readonly menu: DishId[];
+  private menu: DishId[] = [];
+  /** A caller-pinned menu (tests). Null means "whatever the level declares". */
+  private readonly menuOverride: DishId[] | null;
+  /** Per-level tuning, defaulted from shared/types by the level parser. */
+  private roundMs = 0;
+  private orderMs = 0;
+  private orderSpawnMs = 0;
+  private maxOrders = 0;
 
   constructor(opts: GameOptions = {}) {
     this.rand = mulberry32(opts.seed ?? ((Math.random() * 0xffffffff) >>> 0));
-    const level = createLevel();
-    this.menu = [...(opts.menu ?? DEFAULT_MENU)];
-    // Fail loudly at construction: an order nobody can cook is a level bug,
-    // and it is much cheaper to catch here than on the TV at −10 a ticket.
-    assertMenuMakeable(this.menu, capabilitiesOf(level.tiles));
+    this.menuOverride = opts.menu ? [...opts.menu] : null;
+    const level = createLevel(opts.levelId ?? DEFAULT_LEVEL_ID);
     this.spawns = level.spawns;
     this.snapshot = {
       w: level.w,
@@ -217,14 +202,44 @@ export class Game {
       score: 0,
       served: 0,
       missed: 0,
-      msLeft: ROUND_MS,
+      msLeft: level.roundMs,
       phase: 'lobby',
-      dishes: [...this.menu],
+      dishes: [],
+      levelId: level.id,
+      worldId: level.worldId,
     };
+    this.adopt(level);
+  }
+
+  /**
+   * Take on a level: its menu, its tuning, its geometry. The menu check runs
+   * here and nowhere else — an order nobody can cook is a level bug, and it is
+   * much cheaper to catch on load than on the TV at −10 a ticket.
+   */
+  private adopt(level: Level): void {
+    this.menu = this.menuOverride ? [...this.menuOverride] : [...level.menu];
+    assertMenuMakeable(this.menu, capabilitiesOf(level.tiles));
+    this.roundMs = level.roundMs;
+    this.orderMs = level.orderMs;
+    this.orderSpawnMs = level.orderSpawnMs;
+    this.maxOrders = level.maxOrders;
+    this.spawns = level.spawns;
+    const s = this.snapshot;
+    s.levelId = level.id;
+    s.worldId = level.worldId;
+    s.w = level.w;
+    s.h = level.h;
+    s.tiles = level.tiles;
+    s.dishes = [...this.menu];
   }
 
   get phase(): Phase {
     return this.snapshot.phase;
+  }
+
+  /** Which kitchen this Game is currently set up to cook in. */
+  get levelId(): string {
+    return this.snapshot.levelId;
   }
 
   get playerCount(): number {
@@ -233,31 +248,33 @@ export class Game {
 
   // --- lifecycle -----------------------------------------------------------
 
-  /** Begin a round: fresh kitchen, fresh orders, everyone back on a spawn. */
-  start(): void {
-    this.resetWorld('playing');
+  /**
+   * Begin a round: fresh kitchen, fresh orders, everyone back on a spawn.
+   * `levelId` switches kitchens first, so "start" and "play this level" are
+   * the same call.
+   */
+  start(levelId?: string): void {
+    this.resetWorld('playing', levelId);
     this.spawnOrder();
   }
 
   /** Return to the lobby (Play Again): fresh kitchen, no orders, no clock. */
-  toLobby(): void {
-    this.resetWorld('lobby');
+  toLobby(levelId?: string): void {
+    this.resetWorld('lobby', levelId);
   }
 
-  private resetWorld(phase: Phase): void {
-    const level = createLevel();
-    this.spawns = level.spawns;
+  private resetWorld(phase: Phase, levelId?: string): void {
+    // An unknown id is ignored rather than fatal: it can only come off the
+    // wire, and dropping the round because a phone sent junk is worse.
+    const level = createLevel(isLevelId(levelId) ? levelId : this.snapshot.levelId);
+    this.adopt(level);
     const s = this.snapshot;
-    s.w = level.w;
-    s.h = level.h;
-    s.tiles = level.tiles;
     s.orders = [];
     s.score = 0;
     s.served = 0;
     s.missed = 0;
-    s.msLeft = ROUND_MS;
+    s.msLeft = this.roundMs;
     s.phase = phase;
-    s.dishes = [...this.menu];
     this.orderTimerMs = 0;
     this.nextOrderId = 1;
 
@@ -301,18 +318,25 @@ export class Game {
       throw new Error('restoreSnapshot: missing players or orders');
     }
 
+    // The checkpoint decides which kitchen this is: a host that reconnects
+    // mid-round has to come back to the level the round is being played on,
+    // menu, tuning and all. Anything unrecognised leaves us where we are.
+    if (isLevelId(src.levelId) && src.levelId !== this.snapshot.levelId) {
+      this.adopt(createLevel(src.levelId));
+    }
+
     const s = this.snapshot;
     s.w = src.w;
     s.h = src.h;
     s.tiles = src.tiles.map(cloneTile);
     s.orders = src.orders.map((o) => ({ ...o, recipe: [...o.recipe] }));
-    // The menu is this Game's, not the checkpoint's: a resumed host runs the
-    // same level, and a snapshot from an older build may not carry one.
+    // The menu comes from the level, not from the checkpoint: a snapshot from
+    // an older build may not carry one at all.
     s.dishes = [...this.menu];
     s.score = num(src.score);
     s.served = num(src.served);
     s.missed = num(src.missed);
-    s.msLeft = clamp(num(src.msLeft), 0, ROUND_MS);
+    s.msLeft = clamp(num(src.msLeft), 0, this.roundMs);
     s.phase = src.phase === 'playing' || src.phase === 'gameover' ? src.phase : 'lobby';
 
     this.rts.clear();
@@ -332,7 +356,7 @@ export class Game {
     }
 
     // Tiles came from the checkpoint; spawns are level geometry.
-    this.spawns = createLevel().spawns;
+    this.spawns = createLevel(s.levelId).spawns;
     this.orderTimerMs = 0;
     this.nextOrderId = s.orders.reduce((max, o) => Math.max(max, o.id), 0) + 1;
   }
@@ -513,14 +537,14 @@ export class Game {
   // --- orders --------------------------------------------------------------
 
   private spawnOrder(): void {
-    if (this.snapshot.orders.length >= MAX_ORDERS) return;
+    if (this.snapshot.orders.length >= this.maxOrders) return;
     const dish = this.menu[Math.floor(this.rand() * this.menu.length) % this.menu.length]!;
     const order: Order = {
       id: this.nextOrderId++,
       dish,
       recipe: [...DISHES[dish].parts],
-      msLeft: ORDER_MS,
-      totalMs: ORDER_MS,
+      msLeft: this.orderMs,
+      totalMs: this.orderMs,
     };
     this.snapshot.orders.push(order);
   }
@@ -539,8 +563,8 @@ export class Game {
     }
 
     this.orderTimerMs += dt;
-    while (this.orderTimerMs >= ORDER_SPAWN_MS) {
-      this.orderTimerMs -= ORDER_SPAWN_MS;
+    while (this.orderTimerMs >= this.orderSpawnMs) {
+      this.orderTimerMs -= this.orderSpawnMs;
       this.spawnOrder();
     }
   }
