@@ -12,9 +12,106 @@ export interface HudLayout {
   hudH: number;
 }
 
+/**
+ * One typographic system for both HUD groups: a small tracked caption, and a
+ * big outlined figure under it, left edges on the same x. Every number in the
+ * bar uses the same outline ratio so none of them reads heavier than another.
+ */
+const CAP_SIZE = 24; // caption size, in `u`
+const CAP_TRACK = 6; // caption letter-spacing, in `u`
+const CAP_FILL = 'rgba(255, 246, 227, 0.62)';
+/** Outline width as a fraction of the font size. */
+const OUTLINE = 0.09;
+
 function clock(ms: number): string {
   const s = Math.max(0, Math.ceil(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+/**
+ * The alphabetic baseline to draw `s` on so its *ink* is centred on `cy`.
+ * Canvas' own baselines centre the em box, which for all-caps and digits
+ * sits visibly low; every HUD figure is placed on its ink instead, which is
+ * what makes the star, the caption and the number share one axis.
+ * Callers must pass `baseline: 'alphabetic'`.
+ */
+function inkY(
+  c: CanvasRenderingContext2D,
+  s: string,
+  size: number,
+  cy: number,
+  weight = 800,
+): number {
+  c.font = font(size, weight);
+  const m = c.measureText(s);
+  return cy + (m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) / 2;
+}
+
+/** Width of `s` at a given size — for laying out before drawing. */
+function widthOf(
+  c: CanvasRenderingContext2D,
+  s: string,
+  size: number,
+  weight = 800,
+  tracking = 0,
+): number {
+  c.save();
+  c.font = font(size, weight);
+  (c as unknown as { letterSpacing: string }).letterSpacing = `${tracking}px`;
+  const w = c.measureText(s).width;
+  c.restore();
+  return w;
+}
+
+/** Small tracked caption. `x` is the left edge (or centre when centred). */
+function caption(
+  c: CanvasRenderingContext2D,
+  s: string,
+  x: number,
+  cy: number,
+  u: number,
+  fill = CAP_FILL,
+  align: CanvasTextAlign = 'left',
+): void {
+  const track = u * CAP_TRACK;
+  text(c, s, align === 'center' ? x + track / 2 : x, inkY(c, s, u * CAP_SIZE, cy, 700), {
+    size: u * CAP_SIZE,
+    weight: 700,
+    fill,
+    align,
+    baseline: 'alphabetic',
+    letterSpacing: track,
+  });
+}
+
+/** ✓ and ✕ as paths, so the two chips weigh exactly the same. */
+function tallyGlyph(
+  c: CanvasRenderingContext2D,
+  kind: 'tick' | 'cross',
+  x: number,
+  y: number,
+  r: number,
+  col: string,
+  w: number,
+): void {
+  c.save();
+  c.strokeStyle = col;
+  c.lineWidth = w;
+  c.lineCap = 'round';
+  c.lineJoin = 'round';
+  c.beginPath();
+  if (kind === 'tick') {
+    c.moveTo(x - r, y + r * 0.08);
+    c.lineTo(x - r * 0.28, y + r * 0.74);
+    c.lineTo(x + r, y - r * 0.74);
+  } else {
+    c.moveTo(x - r * 0.78, y - r * 0.78);
+    c.lineTo(x + r * 0.78, y + r * 0.78);
+    c.moveTo(x + r * 0.78, y - r * 0.78);
+    c.lineTo(x - r * 0.78, y + r * 0.78);
+  }
+  c.stroke();
+  c.restore();
 }
 
 function star(c: CanvasRenderingContext2D, x: number, y: number, r: number, fill: string): void {
@@ -119,70 +216,90 @@ export function drawHud(
   c.restore();
 
   const midY = (hudH - u * 6) / 2;
+  /** Every big figure in the bar — score and clock — is this size. */
+  const figSize = u * 62;
 
-  // --- score ---
-  const sx = u * 40;
-  star(c, sx + u * 22, midY - u * 4, u * 24, PAL.butter);
-  text(c, 'SCORE', sx + u * 56, midY - u * 26, {
-    size: u * 26,
-    weight: 700,
-    fill: 'rgba(255,246,227,0.72)',
-    align: 'left',
-    letterSpacing: u * 4,
-  });
-  text(c, String(snap.score), sx + u * 54, midY + u * 20, {
-    size: u * 64,
+  // --- score: caption, then star + figure on one axis, then the chips ---
+  const sx = u * 44;
+  const capCy = u * 23;
+  const numCy = u * 72;
+  const starR = u * 22;
+
+  caption(c, 'SCORE', sx, capCy, u);
+
+  // A five-point star's ink sits above its centre; nudge it back onto the axis.
+  star(c, sx + starR, numCy + starR * 0.096, starR, PAL.butter);
+  // The minus lives in a reserved gutter, so `-29` and `29` put their first
+  // digit — and therefore the star — in exactly the same place.
+  const minusW = widthOf(c, '-', figSize);
+  const digits = String(Math.abs(snap.score));
+  const numX = sx + starR * 2 + u * 17 + minusW;
+  const numY = inkY(c, digits, figSize, numCy);
+  const figure = {
+    size: figSize,
     fill: PAL.cream,
     outline: PAL.ink,
-    outlineWidth: u * 10,
-    align: 'left',
-  });
+    outlineWidth: figSize * OUTLINE,
+    align: 'left' as const,
+    baseline: 'alphabetic' as const,
+  };
+  if (snap.score < 0) text(c, '-', numX - minusW, numY, figure);
+  text(c, digits, numX, numY, figure);
 
-  // served / missed chips
-  const chipY = hudH - u * 30;
-  const chips: Array<[string, string, number]> = [
-    ['✓', '#4fd18b', snap.served],
-    ['✕', PAL.tomato, snap.missed],
+  // served / missed chips, on the same left edge, one clear band below
+  const chipH = u * 36;
+  const chipCy = u * 123;
+  const glyphR = u * 8;
+  const chipPad = u * 15;
+  const chipGap = u * 11;
+  const chipSize = u * 28;
+  const chips: Array<['tick' | 'cross', string, number]> = [
+    ['tick', '#4fd18b', snap.served],
+    ['cross', PAL.tomato, snap.missed],
   ];
   let cx = sx;
-  for (const [glyph, col, val] of chips) {
-    const label = `${glyph} ${val}`;
-    c.font = font(u * 28, 800);
-    const w = c.measureText(label).width + u * 26;
-    rr(c, cx, chipY - u * 20, w, u * 40, u * 20);
-    fillStroke(c, 'rgba(255,246,227,0.10)', 'rgba(255,246,227,0.22)', u * 2);
-    text(c, label, cx + w / 2, chipY, { size: u * 28, weight: 800, fill: col });
+  for (const [kind, col, val] of chips) {
+    const label = String(val);
+    const w = chipPad * 2 + glyphR * 2 + chipGap + widthOf(c, label, chipSize);
+    rr(c, cx, chipCy - chipH / 2, w, chipH, chipH / 2);
+    fillStroke(c, 'rgba(255,246,227,0.12)', 'rgba(255,246,227,0.22)', Math.max(1.5, u * 2.5));
+    tallyGlyph(c, kind, cx + chipPad + glyphR, chipCy, glyphR, col, Math.max(2, u * 5));
+    text(c, label, cx + chipPad + glyphR * 2 + chipGap, inkY(c, label, chipSize, chipCy), {
+      size: chipSize,
+      weight: 800,
+      fill: 'rgba(255,246,227,0.92)',
+      align: 'left',
+      baseline: 'alphabetic',
+    });
     cx += w + u * 12;
   }
 
-  // --- clock ---
+  // --- clock: same rule — caption above the figure, both inside the pill ---
   const low = msLeft <= 30_000;
   const pulse = low ? 0.5 + 0.5 * Math.sin(time * 7) : 0;
-  const tw = u * 250;
-  const th = u * 104;
+  // Measured off a reference so the pill cannot breathe between 1:59 and 0:09.
+  const tw = Math.max(u * 230, widthOf(c, '0:00', figSize) + u * 76);
+  const th = u * 118;
   c.save();
-  c.translate(W / 2, midY + u * 2);
+  c.translate(W / 2, midY);
   c.scale(1 + pulse * 0.05, 1 + pulse * 0.05);
-  rr(c, -tw / 2, -th / 2, tw, th, u * 26);
+  rr(c, -tw / 2, -th / 2, tw, th, u * 30);
   fillStroke(
     c,
     low ? `rgba(120, 22, 14, ${0.75 + pulse * 0.25})` : 'rgba(255,246,227,0.10)',
     low ? PAL.tomato : 'rgba(255,246,227,0.24)',
     u * 4,
   );
-  text(c, clock(msLeft), 0, u * 4, {
-    size: u * 74,
+  caption(c, 'TIME', 0, -u * 33.5, u, low ? 'rgba(255,220,212,0.82)' : CAP_FILL, 'center');
+  const face = clock(msLeft);
+  text(c, face, 0, inkY(c, face, figSize, u * 15.5), {
+    size: figSize,
     fill: low ? '#ffdcd4' : PAL.cream,
     outline: PAL.ink,
-    outlineWidth: u * 10,
+    outlineWidth: figSize * OUTLINE,
+    baseline: 'alphabetic',
   });
   c.restore();
-  text(c, 'TIME', W / 2, hudH - u * 26, {
-    size: u * 22,
-    weight: 700,
-    fill: 'rgba(255,246,227,0.6)',
-    letterSpacing: u * 5,
-  });
 
   // --- order tickets ---
   const tkW = u * 150;
