@@ -249,8 +249,11 @@ export function dishesOfCourse(course: Course): DishId[] {
   return DISH_IDS.filter((id) => DISHES[id].course === course);
 }
 
-/** The starter kitchen's menu. Levels (Plan 04) override this. */
-export const DEFAULT_MENU: DishId[] = [...dishesOfCourse('soup')];
+/**
+ * The starter kitchen's menu: the whole soup book, plus the two burgers its
+ * pan and its bun/meat/cheese crates can serve. Levels (Plan 04) override it.
+ */
+export const DEFAULT_MENU: DishId[] = [...dishesOfCourse('soup'), 'burger', 'cheeseburger'];
 
 /* ------------------------------ prep rules ------------------------------ */
 

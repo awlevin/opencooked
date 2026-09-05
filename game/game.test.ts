@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { DISHES, type IngredientType } from '../shared/catalogue';
+import { DISHES, type DishId, type IngredientType } from '../shared/catalogue';
 import { createLevel } from '../shared/levels';
 import type { Ingredient, Pot, Snapshot, Tile, TileType } from '../shared/types';
 import {
@@ -76,8 +76,8 @@ interface Harness {
   tile(idx: number): Tile;
 }
 
-function harness(players = 1, seed = 7): Harness {
-  const g = new Game({ seed });
+function harness(players = 1, seed = 7, menu?: DishId[]): Harness {
+  const g = new Game({ seed, menu });
   for (let i = 0; i < players; i++) g.addPlayer(`p${i}`, `P${i}`, '#fff');
   g.start();
   const snap = g.snapshot;
@@ -171,6 +171,13 @@ const chopped = (type: IngredientType): Ingredient => ({ type, chopped: true, co
 
 /** A finished ingredient, ready for a plate. */
 const done = (type: IngredientType): Ingredient => ({ type, chopped: true, cooked: true });
+
+/** The crate that stocks one ingredient in the starter kitchen. */
+function crateOf(type: IngredientType): number {
+  const i = CRATES.find((idx) => LEVEL.tiles[idx]!.crate === type);
+  assert.ok(i !== undefined, `no ${type} crate`);
+  return i;
+}
 
 /** Cheat a vessel to 'done', exactly as a tick would: contents cooked too. */
 function finish(pot: Pot): void {
@@ -982,4 +989,192 @@ test('a pan travels like any other cookware', () => {
   h.face(pan);
   h.a();
   assert.equal(h.tile(pan).pot?.kind, 'pan', 'and the same pan goes back');
+});
+
+/* --------------------------- plate assembly ----------------------------- */
+
+/** Which starter-kitchen ingredients need a board before they are usable. */
+const INGREDIENTS_NEEDING_KNIFE = new Set<IngredientType>(['cheese', 'meat']);
+
+/** Crate -> board -> chop -> hand: one prepared ingredient, in hand. */
+function prep(h: Harness, type: IngredientType): void {
+  h.face(crateOf(type));
+  h.a();
+  h.face(BOARDS[0]!);
+  h.a();
+  h.holdB(CHOP_MS + TICK_MS * 2);
+  h.a();
+}
+
+test('chop, fry, plate and serve a burger', () => {
+  const h = harness(1, 7, ['burger']);
+  const pan = PANS[0]!;
+  const counter = COUNTERS[0]!;
+  assert.equal(h.snap.orders[0]!.dish, 'burger');
+
+  prep(h, 'meat');
+  h.face(pan);
+  h.a();
+  assert.equal(held(h), null, 'the patty is in the pan');
+  h.run(FRY_MS + TICK_MS);
+  assert.equal(h.tile(pan).pot!.state, 'done');
+
+  // Park a clean plate, then bring the bun to it.
+  h.face(PLATES[0]!);
+  h.a();
+  h.face(counter);
+  h.a();
+  h.face(crateOf('bun'));
+  h.a();
+  h.face(counter);
+  h.a();
+  const plated = h.tile(counter).item;
+  assert.ok(plated?.kind === 'plate' && partsOf(plated.contents).join() === 'bun');
+  assert.equal(held(h), null, 'the bun needs no knife and no pan');
+
+  // Carry the plate to the pan and tip the patty onto it.
+  h.a();
+  h.face(pan);
+  h.a();
+  const plate = held(h);
+  assert.ok(plate?.kind === 'plate');
+  assert.deepEqual(partsOf(plate.contents), ['bun', 'meat']);
+  assert.equal(h.tile(pan).pot!.state, 'idle', 'the pan is empty again');
+
+  h.face(SERVE[0]!);
+  h.a();
+  assert.equal(held(h), null);
+  assert.equal(h.snap.served, 1);
+  assert.ok(h.snap.score > 0);
+});
+
+test('a cheeseburger assembles in either order', () => {
+  const build = (order: IngredientType[]): number => {
+    const h = harness(1, 3, ['cheeseburger']);
+    const counter = COUNTERS[0]!;
+    h.face(PLATES[0]!);
+    h.a();
+    h.face(counter);
+    h.a();
+    for (const type of order) {
+      if (type === 'meat') {
+        // A patty cannot be carried out of the pan: the plate goes to it.
+        prep(h, 'meat');
+        h.face(PANS[0]!);
+        h.a();
+        h.run(FRY_MS + TICK_MS);
+        h.face(counter);
+        h.a(); // plate in hand
+        h.face(PANS[0]!);
+        h.a(); // patty onto the plate
+        h.face(counter);
+        h.a(); // plate back down
+        continue;
+      }
+      if (INGREDIENTS_NEEDING_KNIFE.has(type)) prep(h, type);
+      else {
+        h.face(crateOf(type));
+        h.a();
+      }
+      h.face(counter);
+      h.a();
+    }
+    const plate = h.tile(counter).item;
+    assert.ok(plate?.kind === 'plate');
+    assert.deepEqual(partsOf(plate.contents), ['bun', 'cheese', 'meat']);
+    h.a();
+    h.face(SERVE[0]!);
+    h.a();
+    return h.snap.served;
+  };
+  assert.equal(build(['bun', 'meat', 'cheese']), 1);
+  assert.equal(build(['cheese', 'bun', 'meat']), 1);
+});
+
+test('a plate refuses a part that no dish on the menu wants', () => {
+  const h = harness(1, 7, ['burger']);
+  const counter = COUNTERS[0]!;
+  h.face(PLATES[0]!);
+  h.a();
+  h.face(counter);
+  h.a();
+
+  // Cheese is perfectly prepared, and no burger on this menu has any.
+  prep(h, 'cheese');
+  h.face(counter);
+  h.a();
+  assert.equal(held(h)?.kind, 'ingredient', 'the plate will not take it');
+  const plate = h.tile(counter).item;
+  assert.ok(plate?.kind === 'plate' && plate.contents.length === 0);
+});
+
+test('a plate takes no part twice over what the menu allows', () => {
+  const h = harness(1, 7, ['burger']);
+  const counter = COUNTERS[0]!;
+  h.face(PLATES[0]!);
+  h.a();
+  h.face(counter);
+  h.a();
+  for (let i = 0; i < 2; i++) {
+    h.face(crateOf('bun'));
+    h.a();
+    h.face(counter);
+    h.a();
+  }
+  assert.equal(held(h)?.kind, 'ingredient', 'a burger has exactly one bun');
+  const plate = h.tile(counter).item;
+  assert.ok(plate?.kind === 'plate' && plate.contents.length === 1);
+});
+
+test('an unfinished part never reaches a plate', () => {
+  const h = harness(1, 7, ['burger']);
+  const counter = COUNTERS[0]!;
+  h.face(PLATES[0]!);
+  h.a();
+  h.face(counter);
+  h.a();
+  // Chopped but raw: the pan has not seen it yet.
+  h.snap.players[0]!.held = { kind: 'ingredient', ing: chopped('meat') };
+  h.face(counter);
+  h.a();
+  assert.equal(held(h)?.kind, 'ingredient', 'a raw patty is not food');
+  const plate = h.tile(counter).item;
+  assert.ok(plate?.kind === 'plate' && plate.contents.length === 0);
+});
+
+test('a full pot pours onto a clean plate but never onto a burger', () => {
+  const h = harness(1, 7, ['burger', 'onion-soup']);
+  const stove = STOVES[0]!;
+  const counter = COUNTERS[0]!;
+  const pot = h.tile(stove).pot!;
+  pot.contents = [chopped('onion'), chopped('onion'), chopped('onion')];
+  finish(pot);
+
+  // A plate that already holds a bun is on its way to a burger; soup is not
+  // part of that plan, and the pour is all-or-nothing.
+  h.face(PLATES[0]!);
+  h.a();
+  h.face(counter);
+  h.a();
+  h.face(crateOf('bun'));
+  h.a();
+  h.face(counter);
+  h.a();
+  h.a(); // pick the plate back up
+  h.face(stove);
+  h.a();
+  const plate = held(h);
+  assert.ok(plate?.kind === 'plate' && plate.contents.length === 1);
+  assert.equal(pot.state, 'done', 'the soup stays in the pot');
+
+  // A clean plate takes the whole pot in one press.
+  h.face(counter);
+  h.a();
+  h.face(PLATES[0]!);
+  h.a();
+  h.face(stove);
+  h.a();
+  const soup = held(h);
+  assert.ok(soup?.kind === 'plate');
+  assert.deepEqual(partsOf(soup.contents), ['onion', 'onion', 'onion']);
 });

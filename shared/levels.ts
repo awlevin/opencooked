@@ -32,16 +32,17 @@ export interface Level {
  * two boards sits in the middle so players must route around each other.
  * Crates north-west, cookware north-east (a frying pan, then two pots),
  * plates + serve south-east, trash south-west: every station is a different
- * trip. The meat crate sits on the west wall by the boards, since a patty is
- * chopped before it is fried. The lone fire extinguisher hangs on the south
- * wall, a whole room away from the stoves that need it.
+ * trip. The burger stock — bun, meat, cheese — sits on the west wall by the
+ * boards, since a patty is chopped before it is fried. The lone fire
+ * extinguisher hangs on the south wall, a whole room away from the stoves
+ * that need it.
  */
 const KITCHEN_ROWS = [
   '#OTM###F#S#S#',
   '#...........#',
-  '#...........#',
+  'U...........#',
   'R...#B###...#',
-  '#...###B#...#',
+  'C...###B#...#',
   '#...........#',
   '#...........P',
   '#X######E##W#',

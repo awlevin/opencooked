@@ -801,6 +801,27 @@ export class Game {
           buzz(BUZZ_PLACE);
           return;
         }
+        // Assembling on a surface. Both directions are the same rule: a
+        // prepared part joins a plate as long as the plate is still on its way
+        // to something on the menu.
+        if (held.kind === 'ingredient' && item?.kind === 'plate') {
+          if (!this.canPlate(item.contents, held.ing)) return;
+          item.contents.push(held.ing);
+          p.held = null;
+          buzz(BUZZ_PLACE);
+          return;
+        }
+        if (held.kind === 'plate' && item?.kind === 'ingredient') {
+          if (!this.canPlate(held.contents, item.ing)) return;
+          held.contents.push(item.ing);
+          tile.item = null;
+          if (tile.t === 'board') {
+            tile.chopMs = 0;
+            this.stopChoppingAt(ti);
+          }
+          buzz(BUZZ_PLACE);
+          return;
+        }
         if (item) return;
         // Boards only accept ingredients (that is all you can chop).
         if (tile.t === 'board' && held.kind !== 'ingredient') return;
