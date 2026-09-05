@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "NODE_ENV=production tsx server/local.ts",
     "typecheck": "tsc --noEmit",
+    "test": "tsx --test 'game/**/*.test.ts' 'shared/**/*.test.ts'",
     "smoke": "tsx scripts/smoke.ts"
   },
   "dependencies": {
