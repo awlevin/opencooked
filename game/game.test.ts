@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { DISHES, type DishId, type IngredientType } from '../shared/catalogue';
+import { DISHES, INGREDIENTS, type DishId, type IngredientType } from '../shared/catalogue';
 import { createLevel } from '../shared/levels';
 import type { Ingredient, Pot, Snapshot, Tile, TileType } from '../shared/types';
 import {
@@ -1177,4 +1177,13 @@ test('a full pot pours onto a clean plate but never onto a burger', () => {
   const soup = held(h);
   assert.ok(soup?.kind === 'plate');
   assert.deepEqual(partsOf(soup.contents), ['onion', 'onion', 'onion']);
+});
+
+test('the pot has exactly as many slots as the biggest boil batch', () => {
+  // POT_CAPACITY is the renderer's fill-pip count and the empty pot's
+  // capacity, so it has to track the catalogue rather than drift from it.
+  const biggest = Math.max(
+    ...Object.values(INGREDIENTS).map((d) => (d.cook === 'boil' ? (d.boilBatch ?? 1) : 0)),
+  );
+  assert.equal(POT_CAPACITY, biggest);
 });

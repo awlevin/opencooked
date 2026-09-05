@@ -145,9 +145,6 @@ export function boilBatchOf(type: IngredientType): number {
   return INGREDIENTS[type].boilBatch ?? 1;
 }
 
-/** Largest batch any ingredient boils in — the pot's physical capacity. */
-export const MAX_BOIL_BATCH = 3;
-
 /** What a dish is, roughly: drives plating art and the demo bots' planning. */
 export type Course = 'soup' | 'salad' | 'burger' | 'sushi';
 
@@ -314,15 +311,6 @@ export function canAddToPlate(
   if (!isReady(ing)) return false;
   const want = [...contents.map((c) => c.type), ing.type];
   return menu.some((id) => isSubMultiset(want, DISHES[id].parts));
-}
-
-/** The dish a finished plate is, if it is any dish on the menu. */
-export function dishOfPlate(
-  contents: readonly Ingredient[],
-  menu: readonly DishId[],
-): DishId | null {
-  const parts = contents.map((c) => c.type);
-  return menu.find((id) => sameMultiset(parts, DISHES[id].parts)) ?? null;
 }
 
 /* --------------------------- menu feasibility --------------------------- */
