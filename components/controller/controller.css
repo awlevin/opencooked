@@ -703,6 +703,40 @@ body {
   white-space: nowrap;
 }
 
+/* Pause: a small round button in the top-right corner. Deliberately far from
+   both thumbs — the stick roams the bottom-left, the action buttons the
+   bottom-right — and deliberately small, because nothing on this screen should
+   be easier to hit than GRAB. */
+.pad-pause {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 3;
+  appearance: none;
+  -webkit-appearance: none;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 1px solid var(--edge);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--muted);
+  font: inherit;
+  font-size: 17px;
+  line-height: 1;
+  padding: 0;
+  touch-action: manipulation;
+  transition:
+    transform 90ms ease,
+    color 160ms ease,
+    background 160ms ease;
+}
+
+.pad-pause:active {
+  transform: scale(0.92);
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.12);
+}
+
 .pad {
   flex: 1 1 auto;
   display: flex;
@@ -904,6 +938,40 @@ body {
     0 2px 0 #141a27,
     0 4px 12px rgba(0, 0, 0, 0.5),
     inset 0 3px 10px rgba(0, 0, 0, 0.45);
+}
+
+/* --------------------------------- paused -------------------------------- */
+
+/* The pad is gone, not covered: a joystick under a modal is a way to walk into
+   a fire you cannot see. One button, and it is the only one. */
+.screen--paused {
+  justify-content: space-between;
+  align-items: center;
+  text-align: center;
+  padding-top: 10px;
+}
+
+.paused-head {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+}
+
+.paused-title {
+  font-size: clamp(40px, 13vw, 68px);
+  letter-spacing: 0.16em;
+  margin-right: -0.16em;
+  color: var(--accent);
+  text-shadow: 0 0 40px var(--accent-glow);
+}
+
+.screen--paused .actions,
+.screen--paused .big-btn {
+  width: min(420px, 100%);
 }
 
 /* --------------------------------- overlay ------------------------------- */
@@ -1167,5 +1235,19 @@ body {
   .stick-hint__ring {
     width: 108px;
     height: 108px;
+  }
+
+  /* The buttons are centred here rather than dropped to the bottom, so shrink
+     pause, tuck it into the corner, and push the cluster down off it. */
+  .pad-pause {
+    top: 0;
+    right: 0;
+    width: 40px;
+    height: 40px;
+    font-size: 15px;
+  }
+
+  .btn-zone {
+    padding-top: 44px;
   }
 }

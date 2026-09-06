@@ -127,6 +127,21 @@ or move the room to the next level. Players may join mid-round and are spawned
 immediately. Every number in brackets above is a per-level override; the
 constants in `shared/types.ts` are only the defaults.
 
+**Pause**: `pause` / `resume` from any seated controller, `phase === 'playing'`
+only — the host screen has no seat and cannot stop the round. While
+`Snapshot.paused` is non-null every clock in the kitchen freezes (round timer,
+order timers, cooking, burning, the fire clock, chopping, spraying, movement
+and dashes) and queued button edges are drained each tick, so nothing fires
+when play starts again. `paused` carries `{by, name, color, sinceMs}`: the name
+and colour are copies, so the TV can still say who did it after that chef's
+phone has gone to sleep, and `sinceMs` is the only clock still running. Any
+chef may resume, including one who did not pause — a dead phone must not hold
+the table hostage — and the pauser disconnecting does not resume on its own.
+The state rides in the snapshot, so it survives a checkpoint and a host
+resume; phones never see snapshots, so each transition also broadcasts
+`{t:'paused', by}` (`by: null` = running), and a phone that joins mid-pause is
+sent it on join.
+
 **Movement**: joystick vector → velocity (3.6 tiles/s). Circle collision
 (r=0.35) vs non-floor tiles and other players (push apart softly). Facing
 = last nonzero input direction. The interaction target is the tile one

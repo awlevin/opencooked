@@ -92,6 +92,21 @@ export interface Order {
 
 export type Phase = 'lobby' | 'playing' | 'gameover';
 
+/**
+ * Who stopped the kitchen. Any chef may pause and any chef may resume, so this
+ * is the round's answer to "who did that?" on the TV and on every phone.
+ *
+ * `name` and `color` are copies, not a lookup: the chef who paused may put
+ * their phone down and walk off, and the screen still has to say who it was.
+ */
+export interface PauseState {
+  by: string; // playerId
+  name: string;
+  color: string;
+  /** Time spent paused so far. Drives the overlay's pulse. */
+  sinceMs: number;
+}
+
 export interface Snapshot {
   w: number;
   h: number;
@@ -103,6 +118,9 @@ export interface Snapshot {
   missed: number; // expired orders
   msLeft: number; // round time remaining
   phase: Phase;
+  // Non-null while the round is frozen. Every timer in the kitchen stops and
+  // input edges are drained, so nothing fires the moment play resumes.
+  paused: PauseState | null;
   dishes: DishId[]; // this level's menu: the dishes orders are drawn from
   // Which kitchen this is. The renderer resolves the world's theme from
   // `worldId`; a resumed host rebuilds spawns and tuning from `levelId`.

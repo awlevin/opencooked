@@ -36,6 +36,12 @@ export type C2S =
   // Any controller may pick the kitchen, from the lobby only. Unknown ids
   // are ignored. See shared/levels for what an id may be.
   | { t: 'select'; levelId: string }
+  // Any seated controller may stop the round, and any seated controller may
+  // start it again — including one who did not pause it. Both are ignored
+  // outside `phase === 'playing'`, and the host screen has no seat, so it
+  // cannot pause on the chefs' behalf.
+  | { t: 'pause' }
+  | { t: 'resume' }
   // --- local mode ---
   // WebRTC handshake, relayed verbatim by the server, which never parses
   // `data` (SDP offer/answer or an ICE candidate). `to` is a playerId when
@@ -67,6 +73,10 @@ export type S2C =
   | { t: 'state'; s: Snapshot }
   // To one controller: vibrate for ms (successful pickup, serve, etc).
   | { t: 'buzz'; ms: number }
+  // To every controller on each pause transition, and to a controller that
+  // joins while the kitchen is stopped. Phones never see snapshots, so this
+  // is the only way they learn who paused. `by: null` means play resumed.
+  | { t: 'paused'; by: LobbyPlayer | null }
   // To everyone when the round ends.
   | { t: 'gameover'; score: number; served: number; missed: number }
   | { t: 'err'; msg: string }

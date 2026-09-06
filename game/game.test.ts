@@ -172,6 +172,9 @@ function faceCorner(h: Harness, idx: number, id: string): void {
 
 const held = (h: Harness, id = 'p0') => h.snap.players.find((p) => p.id === id)!.held;
 
+/** Straight out of the crate: nothing has been done to it yet. */
+const rawOnion = (): Ingredient => ({ type: 'onion', chopped: false, cooked: false });
+
 /** A prepared ingredient, ready for a pot (chopped, not yet cooked). */
 const chopped = (type: IngredientType): Ingredient => ({ type, chopped: true, cooked: false });
 
@@ -1192,4 +1195,124 @@ test('the pot has exactly as many slots as the biggest boil batch', () => {
     ...Object.values(INGREDIENTS).map((d) => (d.cook === 'boil' ? (d.boilBatch ?? 1) : 0)),
   );
   assert.equal(POT_CAPACITY, biggest);
+});
+
+/* --------------------------------- pause -------------------------------- */
+
+/**
+ * Who paused, by name, or null. A function rather than a field read because
+ * `assert.equal` is an assertion signature: comparing `snap.paused` to null
+ * would narrow that property to `null` for the rest of the test.
+ */
+const pausedBy = (h: Harness): string | null => h.snap.paused?.name ?? null;
+
+test('pause freezes every clock in the kitchen, and resume picks them up', () => {
+  const h = harness();
+  const stove = STOVES[0]!;
+  const board = BOARDS[0]!;
+  const burning = STOVES[1]!;
+
+  // One of everything with a clock on it: a pot cooking, a chef chopping,
+  // a tile alight, an order draining, and the round itself.
+  fillPot(h, stove, 'onion');
+  h.tile(board).item = { kind: 'ingredient', ing: rawOnion() };
+  igniteTile(h, burning);
+  h.face(board);
+  h.g.press('p0', 'b');
+  h.run(600);
+
+  const before = {
+    msLeft: h.snap.msLeft,
+    order: h.snap.orders[0]!.msLeft,
+    cook: h.tile(stove).pot!.cookMs,
+    chop: h.tile(board).chopMs,
+    fire: h.tile(burning).fire!.ms,
+  };
+
+  assert.equal(h.g.pause('p0'), true);
+  assert.equal(h.g.paused?.by, 'p0');
+  assert.equal(pausedBy(h), 'P0');
+  h.run(5000);
+
+  assert.equal(h.snap.msLeft, before.msLeft);
+  assert.equal(h.snap.orders[0]!.msLeft, before.order);
+  assert.equal(h.tile(stove).pot!.cookMs, before.cook);
+  assert.equal(h.tile(board).chopMs, before.chop);
+  assert.equal(h.tile(burning).fire!.ms, before.fire);
+  // The pause's own clock is the one thing that keeps counting.
+  assert.ok(h.snap.paused!.sinceMs >= 5000);
+
+  assert.equal(h.g.resume('p0'), true);
+  assert.equal(pausedBy(h), null);
+  h.run(600);
+  assert.ok(h.snap.msLeft < before.msLeft);
+  assert.ok(h.tile(stove).pot!.cookMs > before.cook);
+  assert.ok(h.tile(burning).fire!.ms > before.fire);
+});
+
+test('a button pressed while paused never fires on resume', () => {
+  const h = harness();
+  h.g.pause('p0');
+  h.face(CRATES[0]!);
+  h.a(); // an A press that must be thrown away, not banked
+  h.g.resume('p0');
+  h.run(TICK_MS * 2);
+  assert.equal(held(h), null);
+});
+
+test('pause is refused outside a running round, and to strangers', () => {
+  const h = harness();
+  assert.equal(h.g.pause('nobody'), false);
+  assert.equal(pausedBy(h), null);
+
+  assert.equal(h.g.pause('p0'), true);
+  assert.equal(h.g.pause('p0'), false, 'already paused');
+  assert.equal(h.g.resume('nobody'), false, 'a stranger cannot resume either');
+  assert.equal(pausedBy(h), 'P0');
+  assert.equal(h.g.resume('p0'), true);
+  assert.equal(h.g.resume('p0'), false, 'nothing to resume');
+
+  h.g.toLobby();
+  assert.equal(h.g.pause('p0'), false, 'there is no round to stop');
+  assert.equal(pausedBy(h), null);
+});
+
+test('any chef may resume, including one who did not pause', () => {
+  const h = harness(2);
+  assert.equal(h.g.pause('p1'), true);
+  assert.equal(h.g.paused?.by, 'p1');
+  // The chef who paused walks off; the table is not held hostage.
+  h.g.removePlayer('p1');
+  assert.equal(pausedBy(h), 'P1', 'a disconnect does not resume, and the name stays');
+  assert.equal(h.g.resume('p0'), true);
+  assert.equal(pausedBy(h), null);
+});
+
+test('restoreSnapshot round-trips a paused kitchen', () => {
+  const h = harness();
+  fillPot(h, STOVES[0]!, 'onion');
+  h.run(900);
+  h.g.pause('p0');
+  h.run(400);
+
+  const wire = JSON.parse(JSON.stringify(h.snap)) as Snapshot;
+  const g2 = new Game({ seed: 7, levelId: TEST_LEVEL_ID });
+  g2.restoreSnapshot(wire);
+  assert.deepEqual(g2.snapshot.paused, wire.paused);
+
+  // Still frozen after the restore: a host reconnect must not start eight
+  // chefs running again while they are all looking at their phones.
+  const cook = g2.snapshot.tiles[STOVES[0]!]!.pot!.cookMs;
+  for (let i = 0; i < 30; i++) g2.tick(TICK_MS);
+  assert.equal(g2.snapshot.tiles[STOVES[0]!]!.pot!.cookMs, cook);
+  assert.equal(g2.resume('p0'), true);
+  for (let i = 0; i < 30; i++) g2.tick(TICK_MS);
+  assert.ok(g2.snapshot.tiles[STOVES[0]!]!.pot!.cookMs > cook);
+});
+
+test('a fresh round is never paused', () => {
+  const h = harness();
+  h.g.pause('p0');
+  h.g.start();
+  assert.equal(pausedBy(h), null);
 });

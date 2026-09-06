@@ -27,24 +27,30 @@ import {
   GameOverScreen,
   JoinScreen,
   LobbyScreen,
+  PausedScreen,
   sanitizeCode,
   type GameOverProps,
   type JoinProps,
   type LobbyProps,
+  type PausedProps,
 } from './screens';
 import { applyAccent, DEFAULT_ACCENT, resetAccent } from './theme';
 
-type Screen = 'join' | 'lobby' | 'playing' | 'gameover';
+type Screen = 'join' | 'lobby' | 'playing' | 'paused' | 'gameover';
 
 // How long a START / PLAY AGAIN button stays disabled before we assume the
 // server is not going to answer and give the player their tap back.
 const ACTION_TIMEOUT_MS = 3000;
+
+/** One short pulse on every pause and every resume, so the phone confirms it. */
+const BUZZ_PAUSE_MS = 60;
 
 /** The screen object currently mounted in the stage. */
 type MountedScreen =
   | { kind: 'join'; v: JoinScreen }
   | { kind: 'lobby'; v: LobbyScreen }
   | { kind: 'playing'; v: GamepadView }
+  | { kind: 'paused'; v: PausedScreen }
   | { kind: 'gameover'; v: GameOverScreen };
 
 interface GameOverData {
@@ -69,6 +75,8 @@ export class ControllerApp {
   /** The kitchen the room is set to; the lobby broadcast is the truth. */
   private levelId = DEFAULT_LEVEL_ID;
   private phase: Phase | null = null;
+  /** Who stopped the round, or null while it is running. */
+  private pausedBy: LobbyPlayer | null = null;
   private result: GameOverData = { score: 0, served: 0, missed: 0 };
 
   private joined = false;
@@ -251,6 +259,9 @@ export class ControllerApp {
       case 'phase': {
         this.phase = msg.phase;
         this.busy = false;
+        // Leaving 'playing' ends any pause with it, whatever order the
+        // messages arrive in.
+        if (msg.phase !== 'playing') this.pausedBy = null;
         if (this.joined) this.setScreen(this.screenForPhase(msg.phase));
         break;
       }
@@ -263,6 +274,18 @@ export class ControllerApp {
       }
       case 'buzz': {
         buzz(msg.ms);
+        break;
+      }
+      case 'paused': {
+        // Idempotent: the server re-sends this on join and on every round
+        // start, and an echo of what is already shown must repaint nothing.
+        const was = this.pausedBy !== null;
+        this.pausedBy = msg.by;
+        if (was !== (msg.by !== null)) buzz(BUZZ_PAUSE_MS);
+        if (this.joined && this.phase === 'playing') {
+          this.setScreen(this.screenForPhase('playing'));
+          if (this.view?.kind === 'paused') this.view.v.update(this.pausedProps());
+        }
         break;
       }
       case 'err': {
@@ -304,9 +327,17 @@ export class ControllerApp {
   }
 
   private screenForPhase(phase: Phase): Screen {
-    if (phase === 'playing') return 'playing';
+    if (phase === 'playing') return this.pausedBy ? 'paused' : 'playing';
     if (phase === 'gameover') return 'gameover';
     return 'lobby';
+  }
+
+  private pausedProps(): PausedProps {
+    return {
+      by: this.pausedBy,
+      mine: this.pausedBy !== null && this.pausedBy.id === this.playerId,
+      onResume: () => this.net.send({ t: 'resume' }),
+    };
   }
 
   /* ------------------------------ overlay ------------------------------- */
@@ -378,10 +409,18 @@ export class ControllerApp {
             onMove: (move: Vec2) => this.net.send({ t: 'input', move }),
             onPress: (btn) => this.net.send({ t: 'press', btn }),
             onRelease: (btn) => this.net.send({ t: 'release', btn }),
+            onPause: () => this.net.send({ t: 'pause' }),
           },
           this.name,
         );
         this.mount({ kind: 'playing', v: pad });
+        break;
+      }
+
+      case 'paused': {
+        const props = this.pausedProps();
+        if (this.view?.kind === 'paused') this.view.v.update(props);
+        else this.mount({ kind: 'paused', v: new PausedScreen(props) });
         break;
       }
 

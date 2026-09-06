@@ -182,3 +182,62 @@ test('"next level" is Play Again with a destination', async () => {
   assert.equal(host.last('lobby')?.levelId, 'home-3');
   room.destroy('done');
 });
+
+/**
+ * Who paused, by name, or null. A function rather than a field read because
+ * `assert.equal` is an assertion signature: comparing `snapshot.paused` to
+ * null would narrow that property to `null` for the rest of the test.
+ */
+const pausedBy = (room: Room): string | null => room.snapshot.paused?.name ?? null;
+
+test('any phone pauses, any phone resumes, and the host screen cannot', async () => {
+  const { room, host, phone } = await lobbyRoom();
+  const other = new TestLink('other');
+  room.handleMessage(other, { t: 'join', room: room.code, name: 'Bob' });
+  room.handleMessage(phone, { t: 'start' });
+  assert.equal(room.phase, 'playing');
+  assert.equal(pausedBy(room), null);
+
+  // The host screen has no seat: it cooks nothing, so it stops nothing.
+  room.handleMessage(host, { t: 'pause' });
+  assert.equal(pausedBy(room), null);
+
+  room.handleMessage(phone, { t: 'pause' });
+  assert.equal(pausedBy(room), 'Alice');
+  assert.equal(phone.last('paused')?.by?.name, 'Alice');
+  assert.equal(other.last('paused')?.by?.name, 'Alice');
+  assert.equal(host.last('paused')?.by?.name, 'Alice');
+  // The TV must not wait up to a snapshot interval to show the freeze.
+  assert.equal(host.last('state')?.s.paused?.name, 'Alice');
+
+  // A phone that joins mid-pause is told before it can paint a gamepad.
+  const late = new TestLink('late');
+  room.handleMessage(late, { t: 'join', room: room.code, name: 'Cleo' });
+  assert.equal(late.last('paused')?.by?.name, 'Alice');
+
+  // Somebody else presses Resume.
+  room.handleMessage(other, { t: 'resume' });
+  assert.equal(pausedBy(room), null);
+  assert.equal(phone.last('paused')?.by, null);
+  room.destroy('done');
+});
+
+test('a pause survives the host resuming somewhere else', async () => {
+  const { room, phone, store, ctx } = await lobbyRoom();
+  const code = room.code;
+  room.handleMessage(phone, { t: 'start' });
+  room.handleMessage(phone, { t: 'pause' });
+  await sleep(30); // the checkpoint is fire-and-forget
+
+  const rec = await store.getRoom(code);
+  assert.ok(rec);
+  room.standDown();
+
+  const resumed = await Room.adopt(ctx, rec);
+  assert.ok(resumed);
+  assert.equal(pausedBy(resumed), 'Alice');
+  const host2 = new TestLink('host2');
+  resumed.attachHost(host2, true);
+  assert.equal(host2.last('state')?.s.paused?.name, 'Alice');
+  resumed.destroy('done');
+});

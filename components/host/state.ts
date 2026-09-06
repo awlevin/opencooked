@@ -94,8 +94,11 @@ export class SnapshotBuffer {
     this.lastSampleAt = now;
 
     const prev = this.prev;
+    // A paused kitchen is a still photograph: interpolating toward it would
+    // let chefs drift a few centimetres under the overlay, which reads as the
+    // freeze not having taken.
     let alpha = 1;
-    if (prev) {
+    if (prev && !cur.s.paused) {
       const span = cur.t - prev.t;
       if (span > 0) {
         alpha = (now - INTERP_DELAY_MS - prev.t) / span;
@@ -149,7 +152,9 @@ export class SnapshotBuffer {
     }
 
     // `age` only smooths the countdowns between packets. Cap it so a stalled
-    // socket cannot run the round clock and order bars down to zero.
+    // socket cannot run the round clock and order bars down to zero. Paused,
+    // nothing is counting down, so the caller gets a real age (the pause
+    // overlay animates from it) and is expected not to spend it on clocks.
     const age = clamp(now - cur.t, 0, 400);
     return { snap: cur.s, players, age };
   }

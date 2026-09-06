@@ -17,6 +17,8 @@ export interface GamepadCallbacks {
   onMove: (move: Vec2) => void;
   onPress: (btn: Btn) => void;
   onRelease: (btn: Btn) => void;
+  /** Stop the round for the whole table. */
+  onPause: () => void;
 }
 
 interface ButtonRef {
@@ -52,6 +54,21 @@ export class GamepadView {
     hud.appendChild(el('span', 'pad-hud__dot'));
     hud.appendChild(el('span', 'pad-hud__name', playerName));
     this.root.appendChild(hud);
+
+    // Pause lives in the top-right corner, as far from both thumbs as the
+    // screen allows: the stick roams the bottom-left and the action buttons
+    // sit bottom-right, so nothing here can be hit by accident mid-service.
+    const pause = el('button', 'pad-pause', '⏸');
+    pause.type = 'button';
+    pause.setAttribute('aria-label', 'Pause the game');
+    const onPause = (e: PointerEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.cb.onPause();
+    };
+    pause.addEventListener('pointerdown', onPause);
+    this.disposers.push(() => pause.removeEventListener('pointerdown', onPause));
+    this.root.appendChild(pause);
 
     const pad = el('div', 'pad');
     this.root.appendChild(pad);

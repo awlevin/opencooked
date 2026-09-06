@@ -710,6 +710,10 @@ export class Room {
       case 'select':
         this.select(link, msg.levelId);
         return;
+      case 'pause':
+      case 'resume':
+        this.setPaused(link, msg.t === 'pause');
+        return;
       case 'input': {
         const pid = this.byConn.get(link.id);
         const move = asVec2(msg.move);
@@ -829,6 +833,7 @@ export class Room {
     });
     link.send({ t: 'phase', phase: this.game.phase });
     link.send(this.lobbyMsg());
+    if (this.game.paused) link.send(this.pausedMsg());
     if (this.game.phase === 'gameover') link.send(this.gameoverMsg());
     if (link instanceof RemoteLink) link.requestBind(seat.playerId);
   }
@@ -852,6 +857,8 @@ export class Room {
     }
     this.game.start();
     this.broadcast({ t: 'phase', phase: 'playing' });
+    // A fresh round is running: clear any paused screen left over from the last.
+    this.broadcast(this.pausedMsg());
     this.startLoop();
     void this.checkpoint();
     console.log(`[room ${this.code}] round started with ${this.seats.size} chef(s)`);
@@ -886,6 +893,33 @@ export class Room {
     this.sendLobby();
     void this.persist();
     console.log(`[room ${this.code}] level set to ${this.game.levelId}`);
+  }
+
+  /**
+   * Stop or start the round from a phone. Only a seated chef may: the host
+   * screen has no seat, and a stranger's socket must not be able to freeze a
+   * kitchen it is not cooking in.
+   *
+   * The pauser disconnecting does NOT resume — somebody at the table presses
+   * Resume when the room is ready. That is the point of "any chef can".
+   */
+  private setPaused(link: Link, on: boolean): void {
+    const pid = this.byConn.get(link.id);
+    if (!pid) return;
+    if (!(on ? this.game.pause(pid) : this.game.resume(pid))) return;
+    this.broadcast(this.pausedMsg());
+    // The host renders from snapshots, and the next one is up to SNAPSHOT_MS
+    // away. Send the overlay's state now so the freeze looks instant on the TV.
+    this.host?.send({ t: 'state', s: this.game.snapshot });
+    void this.checkpoint();
+    const who = this.game.paused;
+    console.log(`[room ${this.code}] ${who ? `paused by ${who.name}` : 'resumed'}`);
+  }
+
+  /** Who paused, in roster shape, or `by: null` when the kitchen is running. */
+  private pausedMsg(): S2C {
+    const p = this.game.paused;
+    return { t: 'paused', by: p ? { id: p.by, name: p.name, color: p.color } : null };
   }
 
   // --- disconnects ---------------------------------------------------------

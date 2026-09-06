@@ -324,6 +324,68 @@ export class LobbyScreen implements ScreenView<LobbyProps> {
   }
 }
 
+/* -------------------------------- paused -------------------------------- */
+
+export interface PausedProps {
+  /** Who stopped the kitchen. Null is never rendered — the app unmounts first. */
+  by: LobbyPlayer | null;
+  /** True when this phone is the one that paused, so the copy reads right. */
+  mine: boolean;
+  onResume: () => void;
+}
+
+/**
+ * What every phone shows while the kitchen is stopped. It replaces the pad
+ * outright rather than covering it: a live joystick under a modal is a way to
+ * walk into a fire you cannot see.
+ */
+export class PausedScreen implements ScreenView<PausedProps> {
+  readonly root: HTMLElement;
+  private props: PausedProps;
+  private readonly dot: HTMLElement;
+  private readonly who: HTMLElement;
+  private readonly resume: HTMLButtonElement;
+
+  constructor(p: PausedProps) {
+    this.props = p;
+    this.root = el('div', 'screen screen--paused');
+
+    // Head in the middle of the screen, action at the bottom: the same shape
+    // as the lobby, so RESUME lands where START did — under the thumb.
+    const head = el('div', 'paused-head');
+    head.appendChild(el('h1', 'title paused-title', 'PAUSED'));
+
+    const chip = el('div', 'chef-chip');
+    this.dot = el('span', 'chef-chip__dot');
+    this.who = el('span', 'chef-chip__name');
+    chip.append(this.dot, this.who);
+    head.appendChild(chip);
+    this.root.appendChild(head);
+
+    const actions = el('div', 'actions');
+    this.resume = el('button', 'big-btn big-btn--hero');
+    this.resume.type = 'button';
+    this.resume.textContent = 'RESUME';
+    this.resume.addEventListener('click', () => this.props.onResume());
+    actions.append(this.resume, el('p', 'msg', 'Any chef can resume.'));
+    this.root.appendChild(actions);
+
+    this.update(p);
+  }
+
+  update(p: PausedProps): void {
+    this.props = p;
+    const name = p.by?.name ?? 'A chef';
+    const color = p.by?.color ?? '';
+    setText(this.who, p.mine ? 'You paused' : `${name} paused`);
+    if (color && this.dot.style.background !== color) this.dot.style.background = color;
+  }
+
+  destroy(): void {
+    // Nothing to release: the listener dies with the element.
+  }
+}
+
 /* ------------------------------ game over ------------------------------ */
 
 export interface GameOverProps {

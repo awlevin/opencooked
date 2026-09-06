@@ -4,6 +4,7 @@
 import { themeOf } from '@/shared/levels';
 import type { SnapshotBuffer } from '../state';
 import { drawHud } from './hud';
+import { drawPauseOverlay } from './pause';
 import { drawPlayer, drawPlayerLabel } from './players';
 import { drawKitchen } from './tiles';
 import { rr, text } from './theme';
@@ -16,6 +17,14 @@ export class GameView {
   private cssW = 0;
   private cssH = 0;
   private dpr = 0;
+  /**
+   * The animation clock every draw call is handed. It stops while the kitchen
+   * is paused, so flames, steam, the chop sparks and the ticket shake all hold
+   * still under the overlay — a "frozen" screen that keeps flickering does not
+   * read as frozen.
+   */
+  private clockMs = 0;
+  private lastFrameMs = 0;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -69,11 +78,15 @@ export class GameView {
     const c = this.c;
     const W = this.cssW;
     const H = this.cssH;
-    const time = nowMs / 1000;
 
     c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
 
     const frame = this.buf.sample(nowMs);
+    const paused = frame?.snap.paused ?? null;
+    const dtMs = this.lastFrameMs === 0 ? 0 : Math.min(nowMs - this.lastFrameMs, 250);
+    this.lastFrameMs = nowMs;
+    if (!paused) this.clockMs += dtMs;
+    const time = this.clockMs / 1000;
     // One resolve per frame: every draw call below is handed the world's
     // colours, so none of them has to know which world it is drawing.
     const theme = themeOf(frame?.snap.worldId ?? '');
@@ -162,6 +175,11 @@ export class GameView {
     c.lineWidth = Math.max(3, 9 * u);
     c.stroke();
 
-    drawHud(c, { W, H, u, hudH }, snap, Math.max(0, snap.msLeft - age), age, time, theme);
+    // Paused, no clock is draining, so the HUD gets no smoothing age at all:
+    // the round timer and every ticket bar hold exactly where they stopped.
+    const hudAge = paused ? 0 : age;
+    drawHud(c, { W, H, u, hudH }, snap, Math.max(0, snap.msLeft - hudAge), hudAge, time, theme);
+
+    if (paused) drawPauseOverlay(c, W, H, u, hudH, paused, theme, age);
   }
 }

@@ -22,6 +22,7 @@ import type {
   HeldItem,
   Ingredient,
   Order,
+  PauseState,
   Phase,
   PlayerState,
   Pot,
@@ -156,6 +157,17 @@ function clonePlayer(p: PlayerState): PlayerState {
   };
 }
 
+/** A checkpointed pause, or null. Anything malformed reads as "not paused". */
+function clonePause(p: PauseState | null | undefined): PauseState | null {
+  if (!p || typeof p.by !== 'string' || p.by.length === 0) return null;
+  return {
+    by: p.by,
+    name: String(p.name ?? ''),
+    color: String(p.color ?? ''),
+    sinceMs: Math.max(0, num(p.sinceMs)),
+  };
+}
+
 export interface GameOptions {
   /** Seed the recipe RNG for reproducible runs (tests). */
   seed?: number;
@@ -204,6 +216,7 @@ export class Game {
       missed: 0,
       msLeft: level.roundMs,
       phase: 'lobby',
+      paused: null,
       dishes: [],
       levelId: level.id,
       worldId: level.worldId,
@@ -246,6 +259,11 @@ export class Game {
     return this.rts.size;
   }
 
+  /** Who stopped the kitchen, or null while it is running. */
+  get paused(): PauseState | null {
+    return this.snapshot.paused;
+  }
+
   // --- lifecycle -----------------------------------------------------------
 
   /**
@@ -275,6 +293,7 @@ export class Game {
     s.missed = 0;
     s.msLeft = this.roundMs;
     s.phase = phase;
+    s.paused = null;
     this.orderTimerMs = 0;
     this.nextOrderId = 1;
 
@@ -338,6 +357,9 @@ export class Game {
     s.missed = num(src.missed);
     s.msLeft = clamp(num(src.msLeft), 0, this.roundMs);
     s.phase = src.phase === 'playing' || src.phase === 'gameover' ? src.phase : 'lobby';
+    // A kitchen that was stopped comes back stopped: a host reconnect must not
+    // set eight chefs running again while they are all looking at their phones.
+    s.paused = s.phase === 'playing' ? clonePause(src.paused) : null;
 
     this.rts.clear();
     s.players = [];
@@ -485,6 +507,34 @@ export class Game {
     if (btn === 'b') rt.bDown = false;
   }
 
+  /**
+   * Stop the kitchen at this chef's request. Returns false — and changes
+   * nothing — when there is no round to stop, when it is already stopped, or
+   * when `id` is not a chef in it.
+   *
+   * The name and colour are copied out of the roster here, so the TV can still
+   * say who did it after that chef's phone has gone to sleep.
+   */
+  pause(id: string): boolean {
+    const rt = this.rts.get(id);
+    const s = this.snapshot;
+    if (!rt || s.phase !== 'playing' || s.paused) return false;
+    s.paused = { by: id, name: rt.s.name, color: rt.s.color, sinceMs: 0 };
+    return true;
+  }
+
+  /**
+   * Start the kitchen again. Any chef may do this, not only the one who
+   * paused: a phone that ran out of battery must never be able to hold the
+   * whole table hostage.
+   */
+  resume(id: string): boolean {
+    const s = this.snapshot;
+    if (!this.rts.has(id) || s.phase !== 'playing' || !s.paused) return false;
+    s.paused = null;
+    return true;
+  }
+
   // --- simulation ----------------------------------------------------------
 
   tick(dtMs: number): BuzzEvent[] {
@@ -502,6 +552,19 @@ export class Game {
     }
 
     const s = this.snapshot;
+
+    // Paused: nothing in the kitchen moves, and every button pressed while the
+    // game was stopped is thrown away rather than fired all at once on resume.
+    // The one clock that keeps running is the pause's own.
+    if (s.paused) {
+      s.paused.sinceMs += dt;
+      for (const rt of this.rts.values()) {
+        rt.aPresses = 0;
+        rt.bPresses = 0;
+      }
+      return events;
+    }
+
     s.msLeft = Math.max(0, s.msLeft - dt);
     this.updateOrders(dt);
     this.updatePots(dt);

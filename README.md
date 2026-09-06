@@ -66,7 +66,9 @@ minutes. Full rules, the menu and the interaction table live in
 | **Night Sushi Bar** | Rice & fish · Rolling · Omakase | rice boils one portion at a time, nori is walled in behind the pass, and six pots are all burning at once |
 
 Any chef picks the kitchen from their phone in the lobby (`‹ ›` above START),
-and the game-over screen offers **Next level**. Each world has its own
+and the game-over screen offers **Next level**. Mid-round, the **⏸** in the
+corner of any phone freezes the whole kitchen — the TV and every other phone
+say who did it, and any chef can press **Resume**. Each world has its own
 palette and its own floor, resolved from the level and passed to the renderer
 — which is also where a future sprite pack will slot in.
 
