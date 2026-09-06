@@ -23,7 +23,15 @@ import {
   saveName,
   saveRoom,
 } from './platform';
-import { gameOverScreen, joinScreen, lobbyScreen, sanitizeCode } from './screens';
+import {
+  GameOverScreen,
+  JoinScreen,
+  LobbyScreen,
+  sanitizeCode,
+  type GameOverProps,
+  type JoinProps,
+  type LobbyProps,
+} from './screens';
 import { applyAccent, DEFAULT_ACCENT, resetAccent } from './theme';
 
 type Screen = 'join' | 'lobby' | 'playing' | 'gameover';
@@ -31,6 +39,13 @@ type Screen = 'join' | 'lobby' | 'playing' | 'gameover';
 // How long a START / PLAY AGAIN button stays disabled before we assume the
 // server is not going to answer and give the player their tap back.
 const ACTION_TIMEOUT_MS = 3000;
+
+/** The screen object currently mounted in the stage. */
+type MountedScreen =
+  | { kind: 'join'; v: JoinScreen }
+  | { kind: 'lobby'; v: LobbyScreen }
+  | { kind: 'playing'; v: GamepadView }
+  | { kind: 'gameover'; v: GameOverScreen };
 
 interface GameOverData {
   score: number;
@@ -62,7 +77,11 @@ export class ControllerApp {
   private notice: string | null = null;
   private status: NetStatus = 'idle';
 
-  private pad: GamepadView | null = null;
+  /**
+   * The screen that is mounted. Screens are objects that patch themselves in
+   * place; only a change of `kind` swaps the element under the player.
+   */
+  private view: MountedScreen | null = null;
 
   private started = false;
   private destroyed = false;
@@ -131,10 +150,8 @@ export class ControllerApp {
       this.unlockGestures = null;
     }
 
-    if (this.pad) {
-      this.pad.destroy();
-      this.pad = null;
-    }
+    this.view?.v.destroy();
+    this.view = null;
 
     this.net.stop();
     releaseWakeLock();
@@ -157,9 +174,10 @@ export class ControllerApp {
   }
 
   /**
-   * Move the room to another kitchen. The arrows repaint straight away rather
-   * than waiting for the round trip — a chooser that lags feels broken — and
-   * the server's lobby broadcast is still what decides in the end.
+   * Move the room to another kitchen. The chooser repaints straight away
+   * rather than waiting for the round trip — a chooser that lags feels broken
+   * — and the server's lobby broadcast is still what decides in the end. When
+   * that echo agrees with us, which is the normal case, it paints nothing.
    */
   private selectLevel(levelId: string): void {
     if (levelId === this.levelId) return;
@@ -219,13 +237,15 @@ export class ControllerApp {
         // onto the gamepad, holding the same chef the token reclaimed. A fresh
         // join starts in the lobby until the server says otherwise.
         this.setScreen(this.screenForPhase(this.phase ?? 'lobby'));
-        this.pad?.resync();
+        if (this.view?.kind === 'playing') this.view.v.resync();
         break;
       }
       case 'lobby': {
         this.players = msg.players;
         this.levelId = msg.levelId;
-        if (this.screen === 'lobby') this.render();
+        // Cheap and idempotent: an echo of our own choice repaints nothing.
+        // The game-over screen cares too — it offers the level after this one.
+        if (this.screen === 'lobby' || this.screen === 'gameover') this.render();
         break;
       }
       case 'phase': {
@@ -308,49 +328,51 @@ export class ControllerApp {
     this.render();
   }
 
+  /**
+   * Paint the current screen. A screen that is already mounted is *updated*,
+   * never rebuilt: tearing the lobby down and building it again is what made
+   * the chooser blink, since the new element replays the screen's fade-in from
+   * nothing — once for the tap, once for the server's echo of it.
+   */
   private render(): void {
     if (this.destroyed) return;
-    // The gamepad owns live pointer state; never rebuild it under a finger.
-    if (this.screen === 'playing' && this.pad) return;
-
-    if (this.pad && this.screen !== 'playing') {
-      this.pad.destroy();
-      this.pad = null;
-    }
-    clear(this.stage);
 
     switch (this.screen) {
-      case 'join':
-        this.stage.appendChild(
-          joinScreen({
-            room: this.room,
-            roomLocked: this.roomLocked,
-            name: this.name,
-            busy: this.busy && this.status !== 'reconnecting',
-            error: this.error,
-            notice: this.notice,
-            onSubmit: (room, name) => this.doJoin(room, name),
-          }),
-        );
+      case 'join': {
+        const props: JoinProps = {
+          room: this.room,
+          roomLocked: this.roomLocked,
+          name: this.name,
+          busy: this.busy && this.status !== 'reconnecting',
+          error: this.error,
+          notice: this.notice,
+          onSubmit: (room, name) => this.doJoin(room, name),
+        };
+        if (this.view?.kind === 'join') this.view.v.update(props);
+        else this.mount({ kind: 'join', v: new JoinScreen(props) });
         break;
+      }
 
-      case 'lobby':
-        this.stage.appendChild(
-          lobbyScreen({
-            name: this.name,
-            color: this.color,
-            room: this.room,
-            players: this.players,
-            playerId: this.playerId,
-            busy: this.busy,
-            levelId: this.levelId,
-            onStart: () => this.sendWithTimeout({ t: 'start' }, 'lobby'),
-            onSelect: (levelId) => this.selectLevel(levelId),
-          }),
-        );
+      case 'lobby': {
+        const props: LobbyProps = {
+          name: this.name,
+          color: this.color,
+          room: this.room,
+          players: this.players,
+          playerId: this.playerId,
+          busy: this.busy,
+          levelId: this.levelId,
+          onStart: () => this.sendWithTimeout({ t: 'start' }, 'lobby'),
+          onSelect: (levelId) => this.selectLevel(levelId),
+        };
+        if (this.view?.kind === 'lobby') this.view.v.update(props);
+        else this.mount({ kind: 'lobby', v: new LobbyScreen(props) });
         break;
+      }
 
       case 'playing': {
+        // The gamepad owns live pointer state; never rebuild it under a finger.
+        if (this.view?.kind === 'playing') break;
         const pad = new GamepadView(
           {
             onMove: (move: Vec2) => this.net.send({ t: 'input', move }),
@@ -359,22 +381,30 @@ export class ControllerApp {
           },
           this.name,
         );
-        this.pad = pad;
-        this.stage.appendChild(pad.root);
+        this.mount({ kind: 'playing', v: pad });
         break;
       }
 
-      case 'gameover':
-        this.stage.appendChild(
-          gameOverScreen({
-            ...this.result,
-            busy: this.busy,
-            levelId: this.levelId,
-            onAgain: () => this.sendWithTimeout({ t: 'again' }, 'gameover'),
-            onNext: (levelId) => this.sendWithTimeout({ t: 'again', levelId }, 'gameover'),
-          }),
-        );
+      case 'gameover': {
+        const props: GameOverProps = {
+          ...this.result,
+          busy: this.busy,
+          levelId: this.levelId,
+          onAgain: () => this.sendWithTimeout({ t: 'again' }, 'gameover'),
+          onNext: (levelId) => this.sendWithTimeout({ t: 'again', levelId }, 'gameover'),
+        };
+        if (this.view?.kind === 'gameover') this.view.v.update(props);
+        else this.mount({ kind: 'gameover', v: new GameOverScreen(props) });
         break;
+      }
     }
+  }
+
+  /** Swap the mounted screen for another kind, tearing the old one down. */
+  private mount(next: MountedScreen): void {
+    this.view?.v.destroy();
+    clear(this.stage);
+    this.view = next;
+    this.stage.appendChild(next.v.root);
   }
 }

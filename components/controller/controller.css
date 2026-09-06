@@ -326,8 +326,8 @@ body {
   appearance: none;
   -webkit-appearance: none;
   flex: none;
-  width: 64px;
-  min-height: 64px;
+  width: 58px;
+  min-height: 62px;
   border-radius: 18px;
   border: 1px solid var(--edge);
   background: var(--panel);
@@ -354,38 +354,142 @@ body {
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  padding: 8px 10px;
+  gap: 8px;
+  padding: 8px;
   border-radius: 18px;
   background: var(--accent-faint);
   border: 1px solid var(--accent-hairline);
 }
 
+/* Sized so the longest world name fits between the arrows on a 390px phone;
+   anything longer ellipsises rather than pushing the step out of the row. */
 .level-pick__world {
-  font-size: 11px;
-  letter-spacing: 0.22em;
-  margin-right: -0.22em;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  margin-right: -0.12em;
   text-transform: uppercase;
   color: var(--accent-bright);
-}
-
-.level-pick__name {
-  font-size: 19px;
-  color: var(--ink);
-  max-width: 100%;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .level-pick__step {
-  font-size: 11px;
-  letter-spacing: 0.18em;
-  margin-right: -0.18em;
+  flex: none;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  margin-right: -0.14em;
   color: var(--muted);
+}
+
+/* One control, two rows: the arrows move the room, the card below shows where
+   they moved it to. */
+.level-choose {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* The preview: the kitchen you are about to cook in, drawn on that world's own
+   palette. The box is a fixed height and the map is letterboxed inside it, so
+   stepping from a small kitchen to a wide one never moves the START button
+   under a thumb. Two stacked canvases crossfade, so the box is never empty. */
+.level-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 20px;
+  background: linear-gradient(180deg, var(--panel-hi), var(--panel));
+  border: 1px solid var(--edge);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.level-preview[hidden] {
+  display: none;
+}
+
+.level-preview__label {
+  font-size: 11px;
+  letter-spacing: 0.24em;
+  margin-right: -0.24em;
+  text-transform: uppercase;
+  color: var(--accent-bright);
+  text-align: center;
+}
+
+.level-preview__map {
+  position: relative;
+  height: clamp(84px, 16vh, 156px);
+  border-radius: 14px;
+  overflow: hidden;
+  background: #0a0d15;
+}
+
+.level-preview__canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 240ms ease;
+}
+
+.level-preview__canvas.is-on {
+  opacity: 1;
+}
+
+/* Used for the one frame where the incoming picture is hidden before it fades
+   in: without it the fade would start from wherever it already was. */
+.level-preview__canvas.is-instant {
+  transition: none;
+}
+
+.level-preview__info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px 2px;
+  min-width: 0;
+}
+
+.level-preview__info.is-fresh {
+  animation: preview-in 260ms ease both;
+}
+
+@keyframes preview-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.level-preview__name,
+.level-preview__menu {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.level-preview__name {
+  font-size: 18px;
+  color: var(--ink);
+}
+
+.level-preview__menu {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.level-preview--compact .level-preview__map {
+  height: clamp(72px, 11vh, 116px);
 }
 
 /* --------------------------------- lobby --------------------------------- */
@@ -936,8 +1040,22 @@ body {
     font-size: 26px;
   }
 
-  .level-pick__name {
-    font-size: 17px;
+  /* No room for a picture, and no room for a card around it; the level's name
+     still has to be readable, so it stays as a plain line under the arrows. */
+  .level-preview__map {
+    display: none;
+  }
+
+  .level-preview {
+    gap: 2px;
+    padding: 0;
+    background: none;
+    border: 0;
+    box-shadow: none;
+  }
+
+  .level-choose {
+    gap: 6px;
   }
 }
 
@@ -1016,8 +1134,12 @@ body {
     padding: 4px 8px;
   }
 
-  .level-pick__name {
+  .level-preview__name {
     font-size: 16px;
+  }
+
+  .level-preview__menu {
+    display: none;
   }
 }
 
