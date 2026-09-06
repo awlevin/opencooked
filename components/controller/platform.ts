@@ -58,11 +58,23 @@ export const clearToken = (room: string): void => {
 
 /* ------------------------------- haptics -------------------------------- */
 
-export function buzz(ms: number): void {
+/** Longest pattern we will play, so a bad packet cannot buzz for a minute. */
+const MAX_BUZZ_STEPS = 9;
+
+/**
+ * Vibrate. A number is one pulse; an array is a pattern — buzz, pause, buzz,
+ * … — which is how a great serve is felt as two pulses and a perfect one as
+ * three. Every step is clamped, because this comes off the wire.
+ */
+export function buzz(ms: number | number[]): void {
   const nav = navigator as Navigator & { vibrate?: (p: number | number[]) => boolean };
   if (typeof nav.vibrate !== 'function') return;
+  const step = (v: unknown): number =>
+    Math.max(1, Math.min(1000, Math.round(typeof v === 'number' && Number.isFinite(v) ? v : 0)));
+  const pattern = Array.isArray(ms) ? ms.slice(0, MAX_BUZZ_STEPS).map(step) : step(ms);
+  if (Array.isArray(pattern) && pattern.length === 0) return;
   try {
-    nav.vibrate(Math.max(1, Math.min(1000, Math.round(ms))));
+    nav.vibrate(pattern);
   } catch {
     /* unsupported or blocked */
   }

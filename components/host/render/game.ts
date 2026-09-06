@@ -3,11 +3,12 @@
 
 import { themeOf } from '@/shared/levels';
 import type { SnapshotBuffer } from '../state';
+import { chefGlow, drawChefGlow, drawServeFx, fxNow } from './fx';
 import { drawHud } from './hud';
 import { drawPauseOverlay } from './pause';
 import { drawPlayer, drawPlayerLabel } from './players';
 import { drawKitchen } from './tiles';
-import { rr, text } from './theme';
+import { rr, text, worldToPx } from './theme';
 
 export class GameView {
   private readonly c: CanvasRenderingContext2D;
@@ -165,7 +166,13 @@ export class GameView {
     }
 
     // chefs, painted back to front so overlaps read correctly
+    const now = fxNow(snap, age);
     const ordered = [...players].sort((a, b) => a.y - b.y);
+    // A halo under the chef who just landed a perfect one, so the celebration
+    // points at a person and not only at the window.
+    for (const p of ordered) {
+      drawChefGlow(c, worldToPx(p.x, T), worldToPx(p.y, T), T, p.color, chefGlow(snap, now, p.id));
+    }
     for (const p of ordered) drawPlayer(c, p, T, time);
     for (const p of ordered) drawPlayerLabel(c, p, T, u);
     c.restore();
@@ -175,10 +182,14 @@ export class GameView {
     c.lineWidth = Math.max(3, 9 * u);
     c.stroke();
 
+    // Celebrations sit over the kitchen but under the HUD, and clip themselves
+    // to the play area: nothing but a departing ticket may touch the rail.
+    drawServeFx(c, snap, now, { W, H, u, hudH, bx, by, bw, bh, T });
+
     // Paused, no clock is draining, so the HUD gets no smoothing age at all:
     // the round timer and every ticket bar hold exactly where they stopped.
     const hudAge = paused ? 0 : age;
-    drawHud(c, { W, H, u, hudH }, snap, Math.max(0, snap.msLeft - hudAge), hudAge, time, theme);
+    drawHud(c, { W, H, u, hudH }, snap, Math.max(0, snap.msLeft - hudAge), hudAge, time, theme, now);
 
     if (paused) drawPauseOverlay(c, W, H, u, hudH, paused, theme, age);
   }

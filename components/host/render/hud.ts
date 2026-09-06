@@ -1,9 +1,10 @@
 // Top bar: score, round clock, and the order queue as little paper tickets.
 // Sized off `u` (1 = a 1920x1080 screen) so text stays couch-legible.
 
-import { DISHES } from '@/shared/catalogue';
+import { DISHES, type DishId } from '@/shared/catalogue';
 import type { WorldTheme } from '@/shared/levels';
-import type { Order, Snapshot } from '@/shared/types';
+import type { IngredientType, Snapshot } from '@/shared/types';
+import { scoreBump, starSpin, ticketExit } from './fx';
 import { drawTicketIcon } from './ingredients';
 import { PAL, clamp, fillStroke, font, rr, text } from './theme';
 
@@ -163,10 +164,17 @@ function star(c: CanvasRenderingContext2D, x: number, y: number, r: number, fill
   fillStroke(c, fill, PAL.ink, r * 0.22);
 }
 
+/**
+ * One paper ticket. Takes the dish and its remaining fraction rather than an
+ * `Order`, because a ticket that has just been served has to be redrawn from
+ * the fx event after the order itself has left the queue.
+ */
 function drawTicket(
   c: CanvasRenderingContext2D,
-  order: Order,
-  msLeft: number,
+  dish: DishId,
+  recipe: readonly IngredientType[],
+  id: number,
+  frac: number,
   x: number,
   y: number,
   w: number,
@@ -174,14 +182,13 @@ function drawTicket(
   u: number,
   time: number,
 ): void {
-  const frac = clamp(order.totalMs > 0 ? msLeft / order.totalMs : 0, 0, 1);
   const urgent = frac < 0.25;
   const flash = urgent ? 0.5 + 0.5 * Math.sin(time * 9) : 0;
 
   c.save();
   c.translate(x + w / 2, y + h / 2);
   // deterministic jaunty angle per order, plus a shake when nearly expired
-  c.rotate((((order.id * 37) % 7) - 3) * 0.006 + flash * 0.012);
+  c.rotate((((id * 37) % 7) - 3) * 0.006 + flash * 0.012);
   if (urgent) c.scale(1 + flash * 0.035, 1 + flash * 0.035);
   c.translate(-w / 2, -h / 2);
 
@@ -200,8 +207,7 @@ function drawTicket(
   // The dish, named across the top of the ticket. A two-word name gets two
   // lines rather than being squeezed to nothing — "DOUBLE ONION & TOMATO" on
   // one line is a grey smear at couch distance.
-  const dish = DISHES[order.dish];
-  const label = (dish?.name ?? '').toUpperCase();
+  const label = (DISHES[dish]?.name ?? '').toUpperCase();
   const maxW = w - u * 20;
   const track = u * 1.5;
   const baseSize = u * 21;
@@ -228,13 +234,13 @@ function drawTicket(
     });
   }
 
-  const n = Math.max(1, order.recipe.length);
+  const n = Math.max(1, recipe.length);
   const barTop = h - u * 13 - u * 10;
   const iconCy = (u * 6 + headH + barTop) / 2;
   const iconR = Math.min(u * 20, (barTop - headH - u * 12) / 2, (w - u * 18) / (n * 2.25));
   const step = (w - u * 16) / n;
   for (let i = 0; i < n; i++) {
-    const ing = order.recipe[i];
+    const ing = recipe[i];
     if (!ing) continue;
     drawTicketIcon(c, ing, u * 8 + step * (i + 0.5), iconCy, iconR);
   }
@@ -267,6 +273,7 @@ export function drawHud(
   age: number,
   time: number,
   theme: WorldTheme,
+  now: number,
 ): void {
   const { W, u, hudH } = L;
 
@@ -292,7 +299,18 @@ export function drawHud(
   caption(c, 'SCORE', sx, capCy, u);
 
   // A five-point star's ink sits above its centre; nudge it back onto the axis.
-  star(c, sx + starR, numCy + starR * 0.096, starR, theme.accent);
+  // A perfect serve turns it once, so the eye is pulled to the number about to
+  // jump rather than having to find it.
+  const spin = starSpin(snap, now);
+  if (spin > 0) {
+    c.save();
+    c.translate(sx + starR, numCy + starR * 0.096);
+    c.rotate(spin);
+    star(c, 0, 0, starR, theme.accent);
+    c.restore();
+  } else {
+    star(c, sx + starR, numCy + starR * 0.096, starR, theme.accent);
+  }
   // The minus lives in a reserved gutter, so `-29` and `29` put their first
   // digit — and therefore the star — in exactly the same place.
   const minusW = widthOf(c, '-', figSize);
@@ -307,8 +325,18 @@ export function drawHud(
     align: 'left' as const,
     baseline: 'alphabetic' as const,
   };
+  // Squash and stretch on a great or perfect serve. Scaled about the figure's
+  // own baseline and left edge, so the star and the caption never move with it.
+  const bump = scoreBump(snap, now);
+  c.save();
+  if (bump > 0) {
+    c.translate(numX, numY);
+    c.scale(1 - bump * 0.1, 1 + bump * 0.22);
+    c.translate(-numX, -numY);
+  }
   if (snap.score < 0) text(c, '-', numX - minusW, numY, figure);
   text(c, digits, numX, numY, figure);
+  c.restore();
 
   // served / missed chips, on the same left edge, one clear band below
   const chipH = u * 36;
@@ -372,12 +400,33 @@ export function drawHud(
   const right = W - u * 36;
   const top = (hudH - u * 6 - tkH) / 2;
   const n = snap.orders.length;
+  /** Left edge of a slot, counted from the right end of the rail. */
+  const slotX = (fromRight: number): number => right - (fromRight + 1) * (tkW + gap) + gap;
   for (let i = 0; i < n; i++) {
     const o = snap.orders[i];
     if (!o) continue;
-    const x = right - (n - i) * (tkW + gap) + gap;
-    drawTicket(c, o, Math.max(0, o.msLeft - age), x, top, tkW, tkH, u, time);
+    const frac = clamp(o.totalMs > 0 ? Math.max(0, o.msLeft - age) / o.totalMs : 0, 0, 1);
+    drawTicket(c, o.dish, o.recipe, o.id, frac, slotX(n - 1 - i), top, tkW, tkH, u, time);
   }
+
+  // A ticket that was just filled leaves the rail instead of blinking out of
+  // existence: it lifts, shrinks and fades out of the slot it held. This is
+  // the one effect allowed to draw on the order rail.
+  for (const ev of snap.fx) {
+    const t = ticketExit(ev, now);
+    if (t < 0) continue;
+    const k = 1 - t;
+    c.save();
+    c.globalAlpha = k * k;
+    const cx = slotX(ev.slot) + tkW / 2;
+    const cy = top + tkH / 2 - t * u * 34;
+    c.translate(cx, cy);
+    c.scale(1 - t * 0.45, 1 - t * 0.45);
+    c.translate(-tkW / 2, -tkH / 2);
+    drawTicket(c, ev.dish, DISHES[ev.dish]?.parts ?? [], ev.id, 1, 0, 0, tkW, tkH, u, time);
+    c.restore();
+  }
+
   if (n === 0) {
     text(c, 'NO ORDERS', right - u * 90, midY, {
       size: u * 26,

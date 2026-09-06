@@ -10,7 +10,7 @@ import { test } from 'node:test';
 
 import { DISHES, INGREDIENTS, type DishId, type IngredientType } from '../shared/catalogue';
 import { createLevel } from '../shared/levels';
-import type { Ingredient, Pot, Snapshot, Tile, TileType } from '../shared/types';
+import type { FxEvent, Ingredient, Pot, Snapshot, Tile, TileType } from '../shared/types';
 import {
   BURN_MS,
   CHOP_MS,
@@ -19,8 +19,12 @@ import {
   FIRE_MS,
   FIRE_SPREAD_MS,
   FRY_MS,
+  FX_MAX,
+  FX_TTL_MS,
   ORDER_SPAWN_MS,
   POT_CAPACITY,
+  SERVE_POINTS,
+  SERVE_TIME_BONUS_MAX,
   TICK_MS,
 } from '../shared/types';
 import { Game } from './game';
@@ -1315,4 +1319,158 @@ test('a fresh round is never paused', () => {
   h.g.pause('p0');
   h.g.start();
   assert.equal(pausedBy(h), null);
+});
+
+/* ------------------------- delight on a served dish ---------------------- */
+
+/**
+ * Serve the queue's first order at a chosen remaining fraction, by winding
+ * that ticket's clock to where the test wants it and tipping a matching pot
+ * onto a plate. Returns the fx event the serve posted.
+ */
+function serveAt(h: Harness, frac: number, id = 'p0'): FxEvent {
+  const order = h.snap.orders[0]!;
+  order.msLeft = order.totalMs * frac;
+  const stove = STOVES[0]!;
+  const pot = h.tile(stove).pot!;
+  pot.contents = order.recipe.map(done);
+  pot.state = 'done';
+  pot.cookMs = 0;
+  h.face(PLATES[0]!, id);
+  h.a(id);
+  h.face(stove, id);
+  h.a(id);
+  h.face(SERVE[0]!, id);
+  h.a(id);
+  const ev = h.snap.fx[h.snap.fx.length - 1];
+  assert.ok(ev, 'the serve posted no fx event');
+  return ev;
+}
+
+test('a serve posts one fx event, tiered by how early it was', () => {
+  for (const [frac, tier] of [
+    [0.9, 'perfect'],
+    [0.5, 'great'],
+    [0.1, 'good'],
+  ] as const) {
+    const h = harness();
+    const before = h.snap.score;
+    const ev = serveAt(h, frac);
+    assert.equal(ev.t, 'serve');
+    assert.equal(ev.tier, tier);
+    assert.equal(ev.playerId, 'p0');
+    assert.equal(ev.dish, h.snap.dishes[0] ?? ev.dish);
+    // The points on the event are the points that were scored, to the point.
+    assert.equal(ev.points, h.snap.score - before);
+    assert.equal(ev.points, SERVE_POINTS + Math.round(SERVE_TIME_BONUS_MAX * frac));
+    // It came out of a serve window, at that window's tile.
+    const i = ev.tile.y * h.snap.w + ev.tile.x;
+    assert.equal(h.tile(i).t, 'serve');
+    assert.equal(ev.at, h.snap.elapsedMs);
+  }
+});
+
+test('a plate nobody ordered is scored and celebrated as nothing', () => {
+  const h = harness();
+  h.face(PLATES[0]!);
+  h.a();
+  const plate = held(h);
+  assert.ok(plate?.kind === 'plate');
+  // Three tomatoes when the ticket wants onions: no order, no points, no fx.
+  plate.contents = [done('tomato'), done('tomato'), done('tomato')];
+  const score = h.snap.score;
+  h.face(SERVE[0]!);
+  h.a();
+  assert.equal(held(h), null);
+  assert.equal(h.snap.score, score);
+  assert.equal(h.snap.served, 0);
+  assert.equal(h.snap.fx.length, 0);
+});
+
+test('three perfect serves in a row is a streak, and anything less breaks it', () => {
+  const h = harness();
+  const streaks: number[] = [];
+  for (const frac of [0.9, 0.9, 0.9, 0.4, 0.9]) {
+    // Keep the rail stocked: each serve takes the ticket it matched.
+    h.run(ORDER_SPAWN_MS);
+    streaks.push(serveAt(h, frac).streak);
+  }
+  assert.deepEqual(streaks, [1, 2, 3, 0, 1]);
+});
+
+test('the fx buffer is short, and forgets what the TV has finished with', () => {
+  const h = harness();
+  // Serve far more dishes than the buffer holds, back to back: the natural
+  // order cadence is slower than the buffer's own lifetime, so the rail is
+  // restocked by hand rather than by waiting 15 s a ticket.
+  const ticket = h.snap.orders[0]!;
+  for (let i = 0; i < FX_MAX + 4; i++) {
+    if (h.snap.orders.length === 0) {
+      h.snap.orders.push({ ...ticket, id: 1000 + i, recipe: [...ticket.recipe] });
+    }
+    serveAt(h, 0.5);
+    h.run(TICK_MS);
+  }
+  assert.equal(h.snap.fx.length, FX_MAX);
+  // Ids only ever go up, so the survivors are the most recent ones.
+  const ids = h.snap.fx.map((e) => e.id);
+  assert.deepEqual(ids, [...ids].sort((a, b) => a - b));
+
+  h.run(FX_TTL_MS + TICK_MS);
+  assert.equal(h.snap.fx.length, 0);
+});
+
+test('a serve buzzes harder the better it was', () => {
+  const pulses = (frac: number): number => {
+    const h = harness();
+    const order = h.snap.orders[0]!;
+    order.msLeft = order.totalMs * frac;
+    const stove = STOVES[0]!;
+    const pot = h.tile(stove).pot!;
+    pot.contents = order.recipe.map(done);
+    pot.state = 'done';
+    h.face(PLATES[0]!);
+    h.a();
+    h.face(stove);
+    h.a();
+    h.face(SERVE[0]!);
+    h.g.press('p0', 'a');
+    const events = h.g.tick(TICK_MS);
+    const buzz = events[events.length - 1]!.buzzMs;
+    // A pattern is buzz, pause, buzz, … so the pulse count is every other step.
+    return Array.isArray(buzz) ? Math.ceil(buzz.length / 2) : 1;
+  };
+  assert.equal(pulses(0.1), 1);
+  assert.equal(pulses(0.5), 2);
+  assert.equal(pulses(0.9), 3);
+});
+
+test('restoreSnapshot round-trips the fx buffer and the round clock', () => {
+  const h = harness();
+  h.run(2000);
+  serveAt(h, 0.9);
+  h.run(200);
+
+  const wire = JSON.parse(JSON.stringify(h.snap)) as Snapshot;
+  const g2 = new Game({ seed: 7, levelId: TEST_LEVEL_ID });
+  g2.restoreSnapshot(wire);
+  assert.equal(g2.snapshot.elapsedMs, wire.elapsedMs);
+  assert.deepEqual(g2.snapshot.fx, wire.fx);
+  // Deep copy, not aliasing.
+  g2.snapshot.fx[0]!.points = 999;
+  assert.notEqual(wire.fx[0]!.points, 999);
+  // And a restored round goes on pruning its own buffer.
+  g2.tick(TICK_MS);
+  assert.equal(g2.snapshot.fx.length, 1);
+  for (let i = 0; i < 200; i++) g2.tick(TICK_MS);
+  assert.equal(g2.snapshot.fx.length, 0);
+});
+
+test('a fresh round starts with an empty buffer and a zeroed clock', () => {
+  const h = harness();
+  h.run(1000);
+  serveAt(h, 0.9);
+  h.g.start();
+  assert.equal(h.snap.fx.length, 0);
+  assert.equal(h.snap.elapsedMs, 0);
 });

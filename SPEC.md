@@ -119,7 +119,10 @@ random from the level's menu. First order at start, a new one every 15 s
 expiry = −10 points and `missed`+1. Serving a plate whose parts match a
 queued order (multiset equality, earliest match wins): +20 points + time
 bonus (up to +10, scaled by the matched order's remaining fraction),
-`served`+1. No matching order: plate is consumed, 0 points.
+`served`+1. No matching order: plate is consumed, 0 points. That same
+fraction sets the serve's **tier** — `perfect` ≥ 0.66, `great` ≥ 0.33,
+`good` below — which is what the celebration is scaled by (see **Quality
+bar**).
 
 **Round**: 180 s (`roundMs`). Any controller can Start from the lobby (needs
 ≥1 player), pick the level from the lobby, and from gameover either Play Again
@@ -229,9 +232,26 @@ window or the extinguisher bracket, and never goes out on its own — it is a
 time sink, not a fail state, and the only answer is the extinguisher.
 
 **Buzz**: send `{t:'buzz'}` to a controller on successful pickup/place/
-serve/chop-complete/fire-out so phones vibrate.
+serve/chop-complete/fire-out so phones vibrate. `ms` may be an array, which is
+a `navigator.vibrate` pattern: a served dish is felt as one pulse, two or
+three, by tier.
 
 ## Quality bar
+
+**Serving a dish is the payoff, so it is celebrated in proportion.** The sim
+appends an `FxEvent` to `Snapshot.fx` — a ring buffer of at most 8, pruned
+after 4 s — carrying the serve window's tile, the chef, the points, the tier
+and the ticket's slot on the rail. `Snapshot.elapsedMs` is the clock the
+renderer measures those events against. A `good` serve gets a `+N` popup in
+the chef's colour and a small puff of sparkles; `great` adds the word, a ring
+out of the window, more sparkles and a squash-and-stretch on the HUD score;
+`perfect` adds confetti in the chef's colour, a starburst, a warm flash, a
+600 ms halo on the chef and one turn of the HUD star. Three perfects in a row
+say `ON FIRE!` instead of `PERFECT!` — text only, because the screen is
+already busy. Every effect is drawn purely from the event's id (which seeds
+its jitter) and its age, so `components/host/render/fx.ts` holds no state,
+allocates nothing per frame, and plays the same celebration on a TV that only
+just connected. Nothing but the departing ticket may draw on the order rail.
 
 TypeScript strict, `npm run typecheck` clean. Host view must look
 delicious at TV distance: chunky cartoon kitchen, big readable orders/score/

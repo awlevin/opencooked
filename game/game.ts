@@ -19,6 +19,7 @@ import type { Level } from '../shared/levels';
 import { DEFAULT_LEVEL_ID, capabilitiesOf, createLevel, isLevelId } from '../shared/levels';
 import type {
   Fire,
+  FxEvent,
   HeldItem,
   Ingredient,
   Order,
@@ -46,21 +47,35 @@ import {
   PLAYER_RADIUS,
   PLAYER_SPEED,
   POT_CAPACITY,
+  FX_MAX,
+  FX_TTL_MS,
   SERVE_POINTS,
   SERVE_TIME_BONUS_MAX,
+  TIER_GREAT,
+  TIER_PERFECT,
 } from '../shared/types';
+import type { ServeTier } from '../shared/types';
 
-/** A haptic pulse the transport layer should forward to one controller. */
+/**
+ * A haptic pulse the transport layer should forward to one controller. An
+ * array is a vibrate pattern — buzz, pause, buzz, … — so a better serve can be
+ * felt as well as seen.
+ */
 export interface BuzzEvent {
   playerId: string;
-  buzzMs: number;
+  buzzMs: number | number[];
 }
 
 const BUZZ_PICKUP = 25;
 const BUZZ_PLACE = 30;
 const BUZZ_CHOP_DONE = 70;
 const BUZZ_FIRE_OUT = 90;
-const BUZZ_SERVE = 150;
+/** One pulse, two, or three: the serve tier, in the hand. */
+const BUZZ_SERVE: Record<ServeTier, number | number[]> = {
+  good: 150,
+  great: [90, 60, 130],
+  perfect: [70, 50, 70, 50, 170],
+};
 
 /** Longest dt a single tick may integrate, so a stalled loop cannot teleport. */
 const MAX_DT_MS = 250;
@@ -157,6 +172,23 @@ function clonePlayer(p: PlayerState): PlayerState {
   };
 }
 
+/** One checkpointed celebration, normalized so a stale build cannot crash the TV. */
+function cloneFx(ev: FxEvent): FxEvent {
+  return {
+    id: num(ev.id),
+    t: 'serve',
+    at: num(ev.at),
+    tile: { x: num(ev.tile?.x), y: num(ev.tile?.y) },
+    playerId: String(ev.playerId ?? ''),
+    color: String(ev.color ?? ''),
+    dish: ev.dish,
+    points: num(ev.points),
+    tier: ev.tier === 'perfect' || ev.tier === 'great' ? ev.tier : 'good',
+    streak: Math.max(0, num(ev.streak)),
+    slot: Math.max(0, num(ev.slot)),
+  };
+}
+
 /** A checkpointed pause, or null. Anything malformed reads as "not paused". */
 function clonePause(p: PauseState | null | undefined): PauseState | null {
   if (!p || typeof p.by !== 'string' || p.by.length === 0) return null;
@@ -190,6 +222,9 @@ export class Game {
   private spawns: Vec2[];
   private orderTimerMs = 0;
   private nextOrderId = 1;
+  private nextFxId = 1;
+  /** Perfect serves in a row. Reset by anything less than perfect. */
+  private perfectStreak = 0;
   /** The dishes orders are drawn from, and the plating rule's whole world. */
   private menu: DishId[] = [];
   /** A caller-pinned menu (tests). Null means "whatever the level declares". */
@@ -217,6 +252,8 @@ export class Game {
       msLeft: level.roundMs,
       phase: 'lobby',
       paused: null,
+      elapsedMs: 0,
+      fx: [],
       dishes: [],
       levelId: level.id,
       worldId: level.worldId,
@@ -294,8 +331,12 @@ export class Game {
     s.msLeft = this.roundMs;
     s.phase = phase;
     s.paused = null;
+    s.elapsedMs = 0;
+    s.fx = [];
     this.orderTimerMs = 0;
     this.nextOrderId = 1;
+    this.nextFxId = 1;
+    this.perfectStreak = 0;
 
     let i = 0;
     for (const rt of this.rts.values()) {
@@ -360,6 +401,8 @@ export class Game {
     // A kitchen that was stopped comes back stopped: a host reconnect must not
     // set eight chefs running again while they are all looking at their phones.
     s.paused = s.phase === 'playing' ? clonePause(src.paused) : null;
+    s.elapsedMs = Math.max(0, num(src.elapsedMs));
+    s.fx = Array.isArray(src.fx) ? src.fx.slice(-FX_MAX).map(cloneFx) : [];
 
     this.rts.clear();
     s.players = [];
@@ -381,6 +424,10 @@ export class Game {
     this.spawns = createLevel(s.levelId).spawns;
     this.orderTimerMs = 0;
     this.nextOrderId = s.orders.reduce((max, o) => Math.max(max, o.id), 0) + 1;
+    this.nextFxId = s.fx.reduce((max, e) => Math.max(max, e.id), 0) + 1;
+    // The streak is not in the wire shape; a resumed round starts counting
+    // again rather than inventing one.
+    this.perfectStreak = 0;
   }
 
   // --- roster --------------------------------------------------------------
@@ -566,6 +613,8 @@ export class Game {
     }
 
     s.msLeft = Math.max(0, s.msLeft - dt);
+    s.elapsedMs += dt;
+    this.pruneFx();
     this.updateOrders(dt);
     this.updatePots(dt);
     this.updateFires(dt);
@@ -835,7 +884,7 @@ export class Game {
     const tile = this.snapshot.tiles[ti];
     if (!tile) return;
     const held = p.held;
-    const buzz = (ms: number) => events.push({ playerId: p.id, buzzMs: ms });
+    const buzz = (ms: number | number[]) => events.push({ playerId: p.id, buzzMs: ms });
     // You cannot take from or put onto a fire. Put it out first.
     if (tile.fire) return;
 
@@ -946,9 +995,11 @@ export class Game {
 
       case 'serve': {
         if (!held || held.kind !== 'plate' || held.contents.length === 0) return;
-        this.serve(held.contents);
+        const tier = this.serve(p, ti, held.contents);
         p.held = null;
-        buzz(BUZZ_SERVE);
+        // A plate nobody ordered still leaves the hand, but it is not a win:
+        // one flat pulse, no celebration.
+        buzz(tier ? BUZZ_SERVE[tier] : BUZZ_PLACE);
         return;
       }
 
@@ -995,17 +1046,63 @@ export class Game {
     }
   }
 
-  /** Score a delivered plate against the order queue (earliest match wins). */
-  private serve(contents: readonly Ingredient[]): void {
+  /**
+   * Score a delivered plate against the order queue (earliest match wins), and
+   * post the celebration the TV plays. Returns how well it landed, or null
+   * when nothing on the rail wanted this plate.
+   */
+  private serve(p: PlayerState, tileIndex: number, contents: readonly Ingredient[]): ServeTier | null {
     const s = this.snapshot;
     const parts = contents.map((c) => c.type);
     const i = s.orders.findIndex((o) => sameMultiset(o.recipe, parts));
-    if (i < 0) return; // no matching order: plate consumed, 0 points
+    if (i < 0) return null; // no matching order: plate consumed, 0 points
     const order = s.orders[i];
     const frac = order.totalMs > 0 ? clamp(order.msLeft / order.totalMs, 0, 1) : 0;
-    s.score += SERVE_POINTS + Math.round(SERVE_TIME_BONUS_MAX * frac);
+    const points = SERVE_POINTS + Math.round(SERVE_TIME_BONUS_MAX * frac);
+    const tier: ServeTier =
+      frac >= TIER_PERFECT ? 'perfect' : frac >= TIER_GREAT ? 'great' : 'good';
+    s.score += points;
     s.served++;
+    // The rail is drawn right-aligned, so the slot a ticket occupied is its
+    // distance from the right end — the one number that stays true after the
+    // splice, and all the renderer needs to fly the ticket off.
+    const slot = s.orders.length - 1 - i;
     s.orders.splice(i, 1);
+
+    this.perfectStreak = tier === 'perfect' ? this.perfectStreak + 1 : 0;
+    this.pushFx({
+      id: this.nextFxId++,
+      t: 'serve',
+      at: s.elapsedMs,
+      tile: { x: tileIndex % s.w, y: Math.floor(tileIndex / s.w) },
+      playerId: p.id,
+      color: p.color,
+      dish: order.dish,
+      points,
+      tier,
+      streak: tier === 'perfect' ? this.perfectStreak : 0,
+      slot,
+    });
+    return tier;
+  }
+
+  // --- fx ------------------------------------------------------------------
+
+  /** Append to the ring buffer, dropping the oldest once it is full. */
+  private pushFx(ev: FxEvent): void {
+    const fx = this.snapshot.fx;
+    fx.push(ev);
+    if (fx.length > FX_MAX) fx.splice(0, fx.length - FX_MAX);
+  }
+
+  /** Drop events the renderer has long finished with. */
+  private pruneFx(): void {
+    const fx = this.snapshot.fx;
+    if (fx.length === 0) return;
+    const cutoff = this.snapshot.elapsedMs - FX_TTL_MS;
+    let keep = 0;
+    while (keep < fx.length && fx[keep]!.at < cutoff) keep++;
+    if (keep > 0) fx.splice(0, keep);
   }
 
   // --- button B: chop / dash -----------------------------------------------

@@ -71,8 +71,10 @@ export type S2C =
   | { t: 'phase'; phase: Phase }
   // To host only, ~20 Hz while playing.
   | { t: 'state'; s: Snapshot }
-  // To one controller: vibrate for ms (successful pickup, serve, etc).
-  | { t: 'buzz'; ms: number }
+  // To one controller: vibrate for ms (successful pickup, serve, etc). An
+  // array is a `navigator.vibrate` pattern — buzz, pause, buzz, … — which is
+  // how a great serve gets two pulses and a perfect one three.
+  | { t: 'buzz'; ms: number | number[] }
   // To every controller on each pause transition, and to a controller that
   // joins while the kitchen is stopped. Phones never see snapshots, so this
   // is the only way they learn who paused. `by: null` means play resumed.
