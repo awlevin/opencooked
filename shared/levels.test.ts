@@ -23,6 +23,7 @@ import {
   themeOf,
   worldOf,
 } from './levels';
+import { menuLine, mixHex, shade, stationColor } from './levels/minimap';
 
 const ids = LEVELS.map((l) => l.id);
 
@@ -154,4 +155,30 @@ test('a level with a broken map refuses to parse', () => {
   );
   // No trash: nowhere to bin a mistake.
   assert.throws(() => parse({ rows: ['#OBS##', '#....#', '#@@@@#', '#@@@@#', '##PWE#'] }), /no trash/);
+});
+
+test('the preview names a level by its menu and colours it by its stations', () => {
+  // The preview is drawn on a canvas, but everything it decides is pure: the
+  // colours and the menu line are checkable without one.
+  const level = levelById('home-3');
+  const theme = themeOf(level.worldId);
+
+  assert.equal(menuLine(levelById('home-1')), 'Onion Soup');
+  // Long menus name three dishes and count the rest.
+  assert.match(menuLine(level), /^Onion Soup · .+ \+\d+ more$/);
+
+  const of = (t: Tile['t']): string => {
+    const tile = level.tiles.find((x) => x.t === t);
+    assert.ok(tile, `home-3 has a ${t}`);
+    return stationColor(tile, theme);
+  };
+  // A crate wears its ingredient; the pass wears the world's accent.
+  const onion = level.tiles.find((t) => t.t === 'crate' && t.crate === 'onion')!;
+  assert.equal(stationColor(onion, theme), INGREDIENTS.onion.color);
+  assert.equal(of('serve'), theme.accent);
+  assert.notEqual(of('stove'), of('board'));
+  assert.notEqual(of('counter'), of('stove'));
+
+  assert.equal(mixHex('#000000', '#ffffff', 0.5), 'rgb(128, 128, 128)');
+  assert.equal(shade('#ffffff', 1), 'rgb(0, 0, 0)');
 });

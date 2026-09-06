@@ -263,12 +263,13 @@ body {
   transform: rotate(-0.7deg);
   max-width: min(92vw, 1400px);
 }
+/* Big enough to read across a room: stations are recognisable by colour, so
+   the map answers "what kind of kitchen is this" before the name does. */
 .host-root .level-map {
   display: block;
   width: auto;
-  height: clamp(58px, 9.5vh, 150px);
+  height: clamp(72px, 14.8vh, 320px);
   border-radius: clamp(4px, 0.6vw, 10px);
-  image-rendering: pixelated;
 }
 .host-root .level-info {
   display: flex;

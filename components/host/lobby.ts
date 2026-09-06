@@ -4,9 +4,10 @@
 // the server never sees it. `/join?room=CODE` is the controller route.
 
 import { levelById, worldOf } from '@/shared/levels';
+import { menuLine } from '@/shared/levels/minimap';
 import type { LobbyPlayer } from '@/shared/types';
 import { q } from './dom';
-import { drawMiniMap, menuLine } from './levelcard';
+import { paintLevelMap } from './levelcard';
 
 const QR_PIXELS = 760; // rendered large, displayed small = crisp on a TV
 
@@ -62,7 +63,7 @@ export class LobbyScreen {
     this.levelWorldEl.textContent = world?.name ?? '';
     this.levelStepEl.textContent = `${level.index} / ${level.count}`;
     this.levelMenuEl.textContent = menuLine(level);
-    drawMiniMap(this.levelMapEl, level);
+    paintLevelMap(this.levelMapEl, level);
   }
 
   reset(): void {
