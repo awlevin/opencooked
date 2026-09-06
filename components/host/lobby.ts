@@ -3,13 +3,15 @@
 // The join URL is built here, on the client, from the page's own origin —
 // the server never sees it. `/join?room=CODE` is the controller route.
 
-import { levelById, worldOf } from '@/shared/levels';
+import { DEFAULT_LEVEL_ID, levelById, worldOf } from '@/shared/levels';
 import { menuLine } from '@/shared/levels/minimap';
 import type { LobbyPlayer } from '@/shared/types';
 import { q } from './dom';
 import { paintLevelMap } from './levelcard';
 
-const QR_PIXELS = 760; // rendered large, displayed small = crisp on a TV
+/** QR bitmap size: rendered large, displayed small = crisp on a TV. The page
+ *  skeleton claims the same square up front so the code can never resize it. */
+export const QR_PIXELS = 760;
 
 /** `${location.origin}/join?room=CODE` — what the QR encodes. */
 export function joinUrlFor(code: string): string {
@@ -77,6 +79,10 @@ export class LobbyScreen {
     this.qrUrl = '';
     const c = this.qrEl.getContext('2d');
     if (c) c.clearRect(0, 0, this.qrEl.width, this.qrEl.height);
+    // A room always opens on the default kitchen, and the page skeleton already
+    // reserves that kitchen's box — so draw it now rather than leaving a hole in
+    // the card until the first broadcast arrives.
+    paintLevelMap(this.levelMapEl, levelById(DEFAULT_LEVEL_ID));
     this.setPlayers([]);
   }
 

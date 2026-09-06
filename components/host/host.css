@@ -23,6 +23,12 @@ body {
   --tomato: #e8503a;
   --mint: #2ec4a0;
   --wood: #b8763c;
+  /* The two sizes the lobby is not allowed to derive from its own content:
+     the QR square, and the box the join URL lives in. Both are reserved before
+     the socket has said anything, so the first paint and the connected paint
+     are the same layout and nothing on screen moves when the room arrives. */
+  --qr: clamp(142px, 18.5vh, 370px);
+  --join-url-w: 15em;
   --font: var(--font-baloo), 'Baloo 2', 'Fredoka', 'Trebuchet MS',
     'Avenir Next Rounded', system-ui, -apple-system, sans-serif;
 
@@ -133,7 +139,7 @@ body {
 /* The lobby carries one row more than the results screen (the level card),
    so it runs a tighter rhythm to stay inside 16:9 without scrolling. */
 .host-root .screen-lobby .stack {
-  gap: clamp(10px, 2.1vh, 30px);
+  gap: clamp(10px, 2vh, 28px);
 }
 
 /* --- title --- */
@@ -212,12 +218,20 @@ body {
   transform: rotate(-1.6deg);
   background: linear-gradient(180deg, #fffaf0, #ffe9c4);
 }
+/* Room codes are four letters of A–Z (no I/O), so the card is cut for the
+   widest four this font can set — WWWW, 3.71em. The dotted placeholder then
+   sits in the same box the real code lands in: the card is the same size for
+   every room, and the same size before the room exists. The type is a shade
+   smaller than a shrink-to-fit code would be, which is the price of never
+   moving the page — and it still reads from the far end of a room. */
 .host-root .code {
-  font-size: clamp(56px, 8.2vw, 240px);
+  width: 3.75em;
+  font-size: clamp(52px, 7.2vw, 210px);
   font-weight: 800;
   line-height: 1;
   letter-spacing: 0.06em;
   text-indent: 0.06em;
+  text-align: center;
   color: var(--ink);
   font-variant-ligatures: none;
 }
@@ -237,16 +251,30 @@ body {
 }
 .host-root .qr-frame canvas {
   display: block;
-  width: clamp(150px, 20vh, 400px);
-  height: clamp(150px, 20vh, 400px);
+  width: var(--qr);
+  height: var(--qr);
   border-radius: 4px;
 }
+/* A fixed box two lines tall. The URL is the one string here whose length the
+   deployment decides, so it is never allowed to set the card's width: a long
+   host wraps inside the box instead of stretching the card out from under the
+   QR code. Two lines are reserved and two is the most it can ever take, so the
+   card is the same size for a bare LAN address and for a long hostname — and
+   for the placeholder that stands in before either exists. The QR is the way in
+   that matters; a hostname long enough to run past two lines gets an ellipsis
+   rather than a card that changes shape. */
 .host-root .join-url {
-  max-width: min(46vw, 900px);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  width: var(--join-url-w);
+  min-height: 2.3em;
+  overflow: hidden;
   font-size: clamp(14px, 1.3vw, 38px);
   font-weight: 600;
   color: var(--ink-soft);
-  word-break: break-all;
+  overflow-wrap: anywhere;
   text-align: center;
   line-height: 1.15;
 }
@@ -333,7 +361,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: clamp(8px, 1vw, 20px);
-  min-height: clamp(48px, 8vh, 104px);
+  min-height: clamp(48px, 7.4vh, 96px);
 }
 .host-root .chef {
   display: flex;
@@ -540,12 +568,15 @@ body {
 }
 
 /* --- connection pill --- */
-/* Sits bottom-centre so it never covers the order tickets. */
+/* It floats over whichever screen is up, so it takes the corner that screen
+   leaves empty. The lobby and the results column both run to the bottom of a
+   16:9 panel — bottom-centre put "Connecting…" straight on top of the roster —
+   and the play screen's order rail owns the top band. Hence: top-right, except
+   while playing, where it drops to the bottom and away from the tickets. */
 .host-root .conn {
   position: absolute;
-  bottom: clamp(10px, 1.4vh, 24px);
-  left: 50%;
-  transform: translateX(-50%);
+  top: clamp(10px, 1.4vh, 24px);
+  right: clamp(12px, 1.4vw, 30px);
   display: none;
   align-items: center;
   gap: 0.5em;
@@ -558,6 +589,13 @@ body {
   font-weight: 700;
   letter-spacing: 0.08em;
   z-index: 5;
+}
+.host-root[data-screen='playing'] .conn {
+  top: auto;
+  right: auto;
+  bottom: clamp(10px, 1.4vh, 24px);
+  left: 50%;
+  transform: translateX(-50%);
 }
 .host-root .conn.show {
   display: flex;

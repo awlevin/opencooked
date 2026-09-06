@@ -8,6 +8,10 @@
 import { Baloo_2 } from 'next/font/google';
 import { useEffect, useRef } from 'react';
 import { mountHostApp } from '@/components/host/app';
+import { mapPixels } from '@/components/host/levelcard';
+import { QR_PIXELS } from '@/components/host/lobby';
+import { DEFAULT_LEVEL_ID, levelById, worldOf } from '@/shared/levels';
+import { menuLine } from '@/shared/levels/minimap';
 import '@/components/host/host.css';
 
 // Baloo 2 is a variable font (400–800); one file covers every weight the
@@ -17,6 +21,14 @@ const baloo = Baloo_2({
   display: 'swap',
   variable: '--font-baloo',
 });
+
+// The lobby card's skeleton is the default kitchen, described exactly as the
+// connected card will describe it: same words, and a canvas already claiming
+// that kitchen's aspect. A room opens on this level, so the first paint and
+// the first broadcast draw the same box and nothing on the page moves.
+const START_LEVEL = levelById(DEFAULT_LEVEL_ID);
+const START_WORLD = worldOf(DEFAULT_LEVEL_ID);
+const START_MAP = mapPixels(START_LEVEL);
 
 export default function HostPage() {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -58,7 +70,7 @@ export default function HostPage() {
             <div className="card qr-card">
               <div className="card-label">Scan to play</div>
               <div className="qr-frame">
-                <canvas data-el="qr" width={8} height={8} />
+                <canvas data-el="qr" width={QR_PIXELS} height={QR_PIXELS} />
               </div>
               <div data-el="joinUrl" className="join-url">
                 connecting…
@@ -67,20 +79,25 @@ export default function HostPage() {
           </div>
 
           <div className="card level-card">
-            <canvas data-el="levelMap" className="level-map" width={8} height={8} />
+            <canvas
+              data-el="levelMap"
+              className="level-map"
+              width={START_MAP.width}
+              height={START_MAP.height}
+            />
             <div className="level-info">
               <div data-el="levelWorld" className="card-label level-world">
-                Home Kitchen
+                {START_WORLD?.name ?? ''}
               </div>
               <div data-el="levelName" className="level-name">
-                Mise en place
+                {START_LEVEL.name}
               </div>
               <div className="level-line">
                 <span data-el="levelStep" className="level-step">
-                  1 / 3
+                  {`${START_LEVEL.index} / ${START_LEVEL.count}`}
                 </span>
                 <span data-el="levelMenu" className="level-menu">
-                  Onion Soup
+                  {menuLine(START_LEVEL)}
                 </span>
               </div>
             </div>

@@ -13,13 +13,19 @@ import { drawMiniMap } from '@/shared/levels/minimap';
  * across a living room: the card displays the bitmap at roughly half this, so
  * it stays sharp on a 4K panel too.
  */
-const CELL = 30;
+export const MAP_CELL = 30;
+
+/** The bitmap size the card's canvas takes for a level, before CSS scales it. */
+export function mapPixels(level: Pick<Level, 'w' | 'h'>): { width: number; height: number } {
+  return { width: level.w * MAP_CELL, height: level.h * MAP_CELL };
+}
 
 /** Paint one kitchen into the lobby card's canvas, at its natural aspect. */
 export function paintLevelMap(canvas: HTMLCanvasElement, level: Level): void {
   const c = canvas.getContext('2d');
   if (!c) return;
-  canvas.width = level.w * CELL;
-  canvas.height = level.h * CELL;
+  const { width, height } = mapPixels(level);
+  canvas.width = width;
+  canvas.height = height;
   drawMiniMap(c, level, themeOf(level.worldId), canvas.width, canvas.height);
 }
