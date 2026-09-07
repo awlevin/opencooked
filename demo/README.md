@@ -63,3 +63,13 @@ and the edit re-times itself; no hand-tuned frame numbers.
 No downloaded images or audio anywhere: the title, the TV/phone diagram and
 the outro are drawn from shapes and Baloo 2, the same face the game uses. The
 video is silent by design.
+
+## Mobile-first review walkthrough
+
+The `ReviewWalkthrough` composition presents the mobile entry, quick-start,
+lobby, gamepad, and clarified host setup using exact 390×844 and 1440×900
+browser captures from the production build.
+
+```bash
+npx remotion render src/index.ts ReviewWalkthrough out/mobile-first-review.mp4
+```

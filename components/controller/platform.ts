@@ -8,6 +8,7 @@
 const NAME_KEY = 'opencooked.name';
 const ROOM_KEY = 'opencooked.room';
 const TOKEN_PREFIX = 'opencooked.token.';
+const TUTORIAL_KEY = 'opencooked.tutorial-seen';
 
 /* ------------------------------- storage -------------------------------- */
 
@@ -39,6 +40,8 @@ export const loadName = (): string => readLocal(NAME_KEY);
 export const saveName = (n: string): void => writeLocal(NAME_KEY, n);
 export const loadRoom = (): string => readLocal(ROOM_KEY);
 export const saveRoom = (r: string): void => writeLocal(ROOM_KEY, r);
+export const hasSeenTutorial = (): boolean => readLocal(TUTORIAL_KEY) === '1';
+export const markTutorialSeen = (): void => writeLocal(TUTORIAL_KEY, '1');
 
 /* -------------------------------- seat token ----------------------------- */
 // The server hands back a token on 'joined'. Replaying it on the next 'join'
@@ -224,11 +227,6 @@ export function lockGestures(): () => void {
     },
     { passive: false },
   );
-
-  // Keep the viewport pinned if the keyboard or a stray gesture moves it.
-  on(window, 'scroll', () => {
-    if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0);
-  });
 
   return () => {
     for (const d of off) d();

@@ -8,3 +8,160 @@ body {
   height: 100%;
   margin: 0;
 }
+
+.welcome-root {
+  display: none;
+}
+
+@media (max-width: 700px), (hover: none) and (pointer: coarse) {
+  .welcome-root {
+    --w-ink: #351f13;
+    --w-cream: #fff8e8;
+    --w-butter: #ffd23f;
+    --w-tomato: #e8503a;
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: grid;
+    min-height: 100dvh;
+    overflow: auto;
+    padding: max(18px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    background: radial-gradient(110% 70% at 12% 0%, #a95323 0%, #552913 48%, #1d1009 100%);
+    color: var(--w-cream);
+    font-family: ui-rounded, 'Avenir Next', 'Trebuchet MS', system-ui, sans-serif;
+    isolation: isolate;
+  }
+
+  .welcome-root::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    opacity: .16;
+    background-image: repeating-linear-gradient(-45deg, transparent 0 25px, #ffd98e 26px 28px, transparent 29px 66px);
+  }
+
+  .welcome-glow {
+    position: fixed;
+    z-index: -1;
+    width: 60vmax;
+    height: 60vmax;
+    border-radius: 50%;
+    filter: blur(80px);
+    opacity: .18;
+  }
+
+  .welcome-glow--one { top: -42vmax; right: -25vmax; background: var(--w-butter); }
+  .welcome-glow--two { bottom: -48vmax; left: -30vmax; background: var(--w-tomato); }
+
+  .welcome-card {
+    width: min(100%, 460px);
+    margin: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding: 22px 20px 20px;
+    border: 3px solid var(--w-ink);
+    border-radius: 30px;
+    background: linear-gradient(155deg, #fffaf0, #ffe5b4);
+    color: var(--w-ink);
+    box-shadow: 0 14px 0 rgba(24, 12, 6, .62), 0 30px 70px rgba(0, 0, 0, .45);
+  }
+
+  .welcome-brand {
+    display: flex;
+    justify-content: center;
+    align-items: baseline;
+    font-weight: 1000;
+    font-size: clamp(32px, 10vw, 46px);
+    line-height: .85;
+    letter-spacing: -.06em;
+    transform: rotate(-1deg);
+  }
+
+  .welcome-brand strong { color: var(--w-tomato); }
+  .welcome-brand em {
+    margin-left: 8px;
+    padding: 5px 8px 6px;
+    border: 2px solid var(--w-ink);
+    border-radius: 999px;
+    background: var(--w-butter);
+    font-size: 11px;
+    font-style: normal;
+    letter-spacing: .12em;
+  }
+
+  .welcome-art {
+    position: relative;
+    display: grid;
+    place-items: center;
+    min-height: 122px;
+    margin: 0 6px;
+    overflow: hidden;
+    border: 3px solid var(--w-ink);
+    border-radius: 22px;
+    background: radial-gradient(circle at 50% 45%, #ffef9a, #f49f3b 58%, #b94e27 100%);
+    box-shadow: inset 0 -10px 0 rgba(91, 39, 18, .18);
+  }
+
+  .welcome-chef { width: 104px; height: 104px; border: 3px solid var(--w-ink); border-radius: 50%; object-fit: cover; filter: drop-shadow(0 8px 0 rgba(91, 39, 18, .25)); animation: welcome-bob 2s ease-in-out infinite; }
+  .welcome-pan { position: absolute; left: 18px; bottom: 10px; font-size: 44px; transform: rotate(-18deg); }
+  .welcome-ticket { position: absolute; right: -8px; top: 13px; padding: 7px 14px; border: 2px solid var(--w-ink); background: var(--w-cream); font-size: 11px; font-weight: 1000; letter-spacing: .15em; transform: rotate(7deg); }
+  .welcome-spark { position: absolute; color: var(--w-cream); font-size: 22px; animation: welcome-pulse 1.4s ease-in-out infinite; }
+  .welcome-spark--one { left: 28%; top: 18%; }
+  .welcome-spark--two { right: 24%; bottom: 16%; animation-delay: -.7s; }
+
+  @keyframes welcome-bob { 50% { transform: translateY(-6px) rotate(2deg); } }
+  @keyframes welcome-pulse { 50% { transform: scale(1.5) rotate(20deg); opacity: .55; } }
+
+  .welcome-copy { text-align: center; }
+  .welcome-kicker { color: #9a4b24; font-size: 11px; font-weight: 900; letter-spacing: .2em; text-transform: uppercase; }
+  .welcome-copy h1 { margin: 5px auto 8px; max-width: 10em; font-size: clamp(31px, 9vw, 43px); line-height: .96; letter-spacing: -.045em; }
+  .welcome-copy p { margin: 0 auto; max-width: 31em; color: #6d452c; font-size: 16px; font-weight: 650; line-height: 1.38; }
+
+  .welcome-actions { display: grid; gap: 10px; }
+  .welcome-actions a, .welcome-actions button {
+    min-height: 58px;
+    display: grid;
+    place-items: center;
+    border-radius: 17px;
+    font: inherit;
+    font-size: 17px;
+    font-weight: 900;
+    letter-spacing: .03em;
+    text-decoration: none;
+    touch-action: manipulation;
+  }
+
+  .welcome-primary { border: 3px solid var(--w-ink); color: var(--w-ink); background: var(--w-butter); box-shadow: 0 7px 0 var(--w-ink); }
+  .welcome-primary:active { transform: translateY(5px); box-shadow: 0 2px 0 var(--w-ink); }
+  .welcome-secondary { border: 2px solid rgba(53, 31, 19, .28); color: #6d452c; background: rgba(255,255,255,.35); }
+
+  .welcome-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 0; padding: 0; list-style: none; }
+  .welcome-steps li { display: grid; justify-items: center; gap: 5px; color: #765039; font-size: 10px; font-weight: 800; line-height: 1.1; text-align: center; }
+  .welcome-steps b { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 50%; background: var(--w-ink); color: var(--w-cream); font-size: 12px; }
+}
+
+@media (max-height: 690px) and (max-width: 700px) {
+  .welcome-card { gap: 12px; padding: 16px; }
+  .welcome-art { min-height: 88px; }
+  .welcome-chef { width: 74px; height: 74px; }
+  .welcome-copy h1 { font-size: 29px; }
+  .welcome-copy p, .welcome-steps { display: none; }
+  .welcome-actions a, .welcome-actions button { min-height: 50px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome-root * { animation: none !important; }
+}
+
+.entry-loading {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #1c110a;
+  color: #ffeac2;
+  font: 700 16px ui-rounded, 'Avenir Next', system-ui, sans-serif;
+  letter-spacing: .08em;
+}

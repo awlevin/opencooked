@@ -89,8 +89,8 @@ export class GamepadView {
 
     // --- right: buttons ---
     const btnZone = el('div', 'btn-zone');
-    const b = this.makeButton('b', 'CHOP', 'DASH · SPRAY');
-    const a = this.makeButton('a', 'GRAB', 'PUT');
+    const b = this.makeButton('b', 'CHOP', 'HOLD · DASH · SPRAY');
+    const a = this.makeButton('a', 'GRAB', 'PICK UP · PUT DOWN');
     btnZone.appendChild(b);
     btnZone.appendChild(a);
     pad.appendChild(btnZone);

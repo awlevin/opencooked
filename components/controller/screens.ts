@@ -66,15 +66,20 @@ export class JoinScreen implements ScreenView<JoinProps> {
     this.root = el('div', 'screen screen--join');
     const card = el('form', 'card');
     card.setAttribute('novalidate', '');
+    card.dataset.scroll = 'true';
 
     card.appendChild(el('div', 'brand', 'OPENCOOKED'));
     card.appendChild(el('div', 'brand__sub', 'PARTY'));
+    card.appendChild(el('p', 'join-promise', 'Your phone becomes a gamepad. No download.'));
 
     if (p.roomLocked) {
       const badge = el('div', 'room-badge');
       badge.appendChild(el('span', 'room-badge__label', 'ROOM'));
       badge.appendChild(el('span', 'room-badge__code', p.room));
       card.appendChild(badge);
+      const change = el('a', 'change-room', 'Wrong kitchen? Change code');
+      change.href = '/join';
+      card.appendChild(change);
       this.codeInput = null;
     } else {
       const field = el('label', 'field');
@@ -122,6 +127,8 @@ export class JoinScreen implements ScreenView<JoinProps> {
     // The message line is always in the layout, so a notice appearing does not
     // shove the form up under the player's thumb.
     this.msg = el('p', 'msg');
+    this.msg.setAttribute('role', 'status');
+    this.msg.setAttribute('aria-live', 'polite');
     card.appendChild(this.msg);
 
     card.addEventListener('submit', (e) => {
@@ -131,7 +138,10 @@ export class JoinScreen implements ScreenView<JoinProps> {
         ? this.props.room
         : sanitizeCode(this.codeInput?.value ?? '');
       const name = sanitizeName(this.nameInput.value).trim();
-      if (!room) {
+      if (room.length !== MAX_CODE) {
+        setText(this.msg, 'Enter the 4-letter code on the kitchen screen.');
+        this.msg.classList.add('msg--error');
+        this.msg.hidden = false;
         this.codeInput?.focus();
         return;
       }
@@ -145,7 +155,7 @@ export class JoinScreen implements ScreenView<JoinProps> {
   update(p: JoinProps): void {
     this.props = p;
     // The inputs are never rewritten from props: the player is typing in them.
-    setText(this.submit, p.busy ? 'JOINING…' : 'JOIN');
+    setText(this.submit, p.busy ? 'JOINING…' : 'JOIN KITCHEN');
     this.submit.disabled = p.busy;
     const text = p.error ?? p.notice ?? '';
     setText(this.msg, text);
@@ -156,6 +166,51 @@ export class JoinScreen implements ScreenView<JoinProps> {
   destroy(): void {
     // Nothing to release: the listeners die with the element.
   }
+}
+
+
+/* ------------------------------ quick start ----------------------------- */
+
+export interface TutorialProps {
+  name: string;
+  onReady: () => void;
+}
+
+export class TutorialScreen implements ScreenView<TutorialProps> {
+  readonly root: HTMLElement;
+
+  constructor(p: TutorialProps) {
+    this.root = el('div', 'screen screen--tutorial');
+    const head = el('div', 'tutorial-head');
+    head.append(el('div', 'tutorial-kicker', `${p.name}, YOUR SHIFT STARTS NOW`));
+    head.append(el('h1', 'tutorial-title', 'TWO THUMBS. ONE KITCHEN.'));
+    head.append(el('p', 'msg tutorial-intro', 'Watch the big screen. Your phone stays a controller.'));
+    this.root.appendChild(head);
+
+    const controls = el('div', 'tutorial-controls');
+    const move = el('div', 'tutorial-control');
+    move.append(el('div', 'tutorial-stick', '↗'), el('div', 'tutorial-control__copy', 'DRAG TO MOVE'));
+    const grab = el('div', 'tutorial-control');
+    grab.append(el('div', 'tutorial-button tutorial-button--grab', 'GRAB'), el('div', 'tutorial-control__copy', 'TAP TO PICK UP & PUT DOWN'));
+    const chop = el('div', 'tutorial-control');
+    chop.append(el('div', 'tutorial-button tutorial-button--chop', 'HOLD'), el('div', 'tutorial-control__copy', 'CHOP · DASH · SPRAY'));
+    controls.append(move, grab, chop);
+    this.root.appendChild(controls);
+
+    const recipe = el('div', 'tutorial-recipe');
+    recipe.append(el('span', '', 'ONION'), el('i', '', '→'), el('span', '', 'CHOP'), el('i', '', '→'), el('span', '', 'COOK'), el('i', '', '→'), el('span', '', 'SERVE'));
+    this.root.appendChild(recipe);
+
+    const actions = el('div', 'actions');
+    const ready = el('button', 'big-btn big-btn--hero', 'GOT IT — LET’S COOK');
+    ready.type = 'button';
+    ready.addEventListener('click', p.onReady);
+    actions.append(ready, el('p', 'msg', 'You can pause from the corner anytime.'));
+    this.root.appendChild(actions);
+  }
+
+  update(_p: TutorialProps): void {}
+  destroy(): void {}
 }
 
 /* ----------------------------- level chooser ---------------------------- */
@@ -261,7 +316,8 @@ export class LobbyScreen implements ScreenView<LobbyProps> {
     this.root = el('div', 'screen screen--lobby');
 
     const head = el('div', 'lobby-head');
-    head.appendChild(el('h1', 'title', "You're in! 🧑‍🍳"));
+    head.appendChild(el('div', 'lobby-status', 'CONNECTED TO THE BIG SCREEN'));
+    head.appendChild(el('h1', 'title', "You're in!"));
     const chip = el('div', 'chef-chip');
     this.dot = el('span', 'chef-chip__dot');
     this.chefName = el('span', 'chef-chip__name');
@@ -296,7 +352,7 @@ export class LobbyScreen implements ScreenView<LobbyProps> {
     setText(this.roomLine, `Room ${p.room} · look for your colour on the TV`);
     this.setRoster(p.players, p.playerId);
     this.picker.update(p.levelId);
-    setText(this.start, p.busy ? 'STARTING…' : 'START');
+    setText(this.start, p.busy ? 'STARTING…' : 'START COOKING');
     this.start.disabled = p.busy;
   }
 

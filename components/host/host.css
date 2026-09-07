@@ -224,6 +224,14 @@ body {
    every room, and the same size before the room exists. The type is a shade
    smaller than a shrink-to-fit code would be, which is the price of never
    moving the page — and it still reads from the far end of a room. */
+.host-root .code-helper {
+  margin-top: .35em;
+  max-width: 20em;
+  color: var(--ink-soft);
+  font-size: clamp(12px, 1vw, 24px);
+  font-weight: 650;
+  text-align: center;
+}
 .host-root .code {
   width: 3.75em;
   font-size: clamp(52px, 7.2vw, 210px);
@@ -519,6 +527,7 @@ body {
   align-items: center;
   line-height: 0.9;
 }
+.host-root .final-score-label { color: var(--cream-2); opacity: .75; }
 .host-root .final-score .n {
   font-size: clamp(76px, 13vw, 340px);
   font-weight: 800;

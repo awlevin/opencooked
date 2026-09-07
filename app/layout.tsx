@@ -5,7 +5,18 @@ export const metadata: Metadata = {
   metadataBase: new URL('https://opencooked.vercel.app'),
   title: 'Opencooked',
   description:
-    'Opencooked — couch co-op cooking chaos. TV screen + phones as gamepads.',
+    'Turn any screen into a couch co-op cooking party. Everyone plays from their phone.',
+  openGraph: {
+    title: 'Opencooked — phones out, aprons on',
+    description: 'Turn any screen into a couch co-op cooking party. Up to 8 chefs, zero downloads.',
+    images: ['/opengraph-image.png'],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Opencooked — phones out, aprons on',
+    description: 'Turn any screen into a couch co-op cooking party. Up to 8 chefs, zero downloads.',
+    images: ['/twitter-image.png'],
+  },
   appleWebApp: { capable: true, statusBarStyle: 'black-translucent' },
   other: { 'mobile-web-app-capable': 'yes', 'format-detection': 'telephone=no' },
 };
@@ -13,8 +24,6 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
   viewportFit: 'cover',
   themeColor: '#1c110a',
 };
