@@ -15,9 +15,11 @@ import { GamepadView } from './gamepad';
 import { Net, type NetStatus } from './net';
 import {
   buzz,
+  hasSeenTutorial,
   loadName,
   loadRoom,
   lockGestures,
+  markTutorialSeen,
   releaseWakeLock,
   requestWakeLock,
   saveName,
@@ -28,6 +30,7 @@ import {
   JoinScreen,
   LobbyScreen,
   PausedScreen,
+  TutorialScreen,
   sanitizeCode,
   type GameOverProps,
   type JoinProps,
@@ -36,7 +39,7 @@ import {
 } from './screens';
 import { applyAccent, DEFAULT_ACCENT, resetAccent } from './theme';
 
-type Screen = 'join' | 'lobby' | 'playing' | 'paused' | 'gameover';
+type Screen = 'join' | 'lobby' | 'tutorial' | 'playing' | 'paused' | 'gameover';
 
 // How long a START / PLAY AGAIN button stays disabled before we assume the
 // server is not going to answer and give the player their tap back.
@@ -49,6 +52,7 @@ const BUZZ_PAUSE_MS = 60;
 type MountedScreen =
   | { kind: 'join'; v: JoinScreen }
   | { kind: 'lobby'; v: LobbyScreen }
+  | { kind: 'tutorial'; v: TutorialScreen }
   | { kind: 'playing'; v: GamepadView }
   | { kind: 'paused'; v: PausedScreen }
   | { kind: 'gameover'; v: GameOverScreen };
@@ -80,6 +84,7 @@ export class ControllerApp {
   private result: GameOverData = { score: 0, served: 0, missed: 0 };
 
   private joined = false;
+  private tutorialSeen = false;
   private busy = false; // a join / start / again is in flight
   private error: string | null = null;
   private notice: string | null = null;
@@ -129,9 +134,10 @@ export class ControllerApp {
     // of a server-rendered bundle and there is no location on the server.
     const params = new URLSearchParams(location.search);
     const fromQuery = sanitizeCode(params.get('room') ?? '');
-    this.roomLocked = fromQuery.length > 0;
+    this.roomLocked = fromQuery.length === 4;
     this.room = fromQuery || sanitizeCode(loadRoom());
     this.name = loadName();
+    this.tutorialSeen = hasSeenTutorial();
 
     // A phone that goes to sleep mid-round should reconnect the moment it wakes.
     this.onVisibility = () => {
@@ -244,7 +250,12 @@ export class ControllerApp {
         // to Vercel's connection cap mid-round drops the player straight back
         // onto the gamepad, holding the same chef the token reclaimed. A fresh
         // join starts in the lobby until the server says otherwise.
-        this.setScreen(this.screenForPhase(this.phase ?? 'lobby'));
+        const joinedPhase = this.phase ?? 'lobby';
+        if (joinedPhase === 'lobby' && !this.tutorialSeen && this.screen === 'join') {
+          this.setScreen('tutorial');
+        } else if (this.screen !== 'tutorial') {
+          this.setScreen(this.screenForPhase(joinedPhase));
+        }
         if (this.view?.kind === 'playing') this.view.v.resync();
         break;
       }
@@ -262,7 +273,17 @@ export class ControllerApp {
         // Leaving 'playing' ends any pause with it, whatever order the
         // messages arrive in.
         if (msg.phase !== 'playing') this.pausedBy = null;
-        if (this.joined) this.setScreen(this.screenForPhase(msg.phase));
+        if (this.joined) {
+          if (msg.phase === 'playing') {
+            if (!this.tutorialSeen) {
+              this.tutorialSeen = true;
+              markTutorialSeen();
+            }
+            this.setScreen(this.screenForPhase(msg.phase));
+          } else if (this.screen !== 'tutorial') {
+            this.setScreen(this.screenForPhase(msg.phase));
+          }
+        }
         break;
       }
       case 'gameover': {
@@ -312,6 +333,7 @@ export class ControllerApp {
     if (this.destroyed) return;
     this.status = status;
     if (status === 'reconnecting') {
+      if (this.view?.kind === 'playing') this.view.v.releaseAll();
       if (!this.joined) {
         this.notice = 'Cannot reach the kitchen. Retrying…';
         this.render();
@@ -398,6 +420,20 @@ export class ControllerApp {
         };
         if (this.view?.kind === 'lobby') this.view.v.update(props);
         else this.mount({ kind: 'lobby', v: new LobbyScreen(props) });
+        break;
+      }
+
+      case 'tutorial': {
+        const props = {
+          name: this.name,
+          onReady: () => {
+            this.tutorialSeen = true;
+            markTutorialSeen();
+            this.setScreen(this.screenForPhase(this.phase ?? 'lobby'));
+          },
+        };
+        if (this.view?.kind === 'tutorial') this.view.v.update(props);
+        else this.mount({ kind: 'tutorial', v: new TutorialScreen(props) });
         break;
       }
 

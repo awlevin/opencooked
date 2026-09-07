@@ -781,7 +781,7 @@ body {
 .stick-hint__label {
   font-size: 11px;
   letter-spacing: 0.34em;
-  color: rgba(255, 255, 255, 0.24);
+  color: rgba(255, 255, 255, 0.52);
   margin-right: -0.34em;
 }
 
@@ -1242,12 +1242,153 @@ body {
   .pad-pause {
     top: 0;
     right: 0;
-    width: 40px;
-    height: 40px;
+    width: 48px;
+    height: 48px;
     font-size: 15px;
   }
 
   .btn-zone {
     padding-top: 44px;
   }
+}
+
+/* ----------------------------- quick start ------------------------------ */
+
+.screen--tutorial {
+  justify-content: space-between;
+  gap: 14px;
+  padding-top: 8px;
+}
+
+.tutorial-head {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  text-align: center;
+}
+
+.tutorial-kicker {
+  color: var(--accent-bright);
+  font-size: 10px;
+  letter-spacing: .2em;
+}
+
+.tutorial-title {
+  margin: 0;
+  max-width: 12em;
+  font-size: clamp(28px, 8vw, 44px);
+  line-height: .95;
+}
+
+.tutorial-intro { max-width: 28em; }
+
+.tutorial-controls {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  align-content: center;
+  gap: 8px;
+}
+
+.tutorial-control {
+  min-width: 0;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 10px;
+  padding: 14px 6px;
+  border: 1px solid var(--edge);
+  border-radius: 18px;
+  background: linear-gradient(180deg, var(--panel-hi), var(--panel));
+  text-align: center;
+}
+
+.tutorial-stick,
+.tutorial-button {
+  width: clamp(58px, 18vw, 84px);
+  height: clamp(58px, 18vw, 84px);
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: clamp(14px, 4vw, 19px);
+  color: #0d1017;
+  background: linear-gradient(180deg, var(--accent-bright), var(--accent));
+  box-shadow: 0 6px 0 var(--accent-deep), 0 10px 22px var(--accent-glow);
+}
+
+.tutorial-stick {
+  color: var(--ink);
+  font-size: 30px;
+  background: linear-gradient(180deg, #39435c, #232b3d);
+  box-shadow: 0 6px 0 #141a27, 0 10px 22px rgba(0,0,0,.45);
+}
+
+.tutorial-button--chop {
+  color: var(--ink);
+  background: linear-gradient(180deg, #39435c, #232b3d);
+  box-shadow: 0 6px 0 #141a27, 0 10px 22px rgba(0,0,0,.45);
+}
+
+.tutorial-control__copy {
+  max-width: 9em;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.25;
+  letter-spacing: .11em;
+}
+
+.tutorial-recipe {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 8px;
+  border: 1px solid var(--accent-hairline);
+  border-radius: 15px;
+  background: var(--accent-faint);
+  color: var(--ink);
+  font-size: clamp(10px, 3vw, 13px);
+}
+
+.tutorial-recipe span { white-space: nowrap; }
+.tutorial-recipe i { color: var(--accent-bright); font-style: normal; }
+
+@media (max-height: 620px) {
+  .screen--tutorial { gap: 8px; }
+  .tutorial-intro, .tutorial-recipe { display: none; }
+  .tutorial-control { padding: 8px 4px; }
+}
+
+.join-promise {
+  margin: -5px 0 2px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.lobby-status {
+  padding: 5px 10px;
+  border-radius: 999px;
+  color: var(--accent-bright);
+  background: var(--accent-faint);
+  border: 1px solid var(--accent-hairline);
+  font-size: 9px;
+  letter-spacing: .16em;
+}
+
+.change-room {
+  align-self: center;
+  margin-top: -6px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+  text-underline-offset: 3px;
+  touch-action: manipulation;
+}
+
+:focus-visible {
+  outline: 3px solid var(--accent-bright);
+  outline-offset: 3px;
 }
