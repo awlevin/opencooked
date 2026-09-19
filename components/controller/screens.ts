@@ -12,6 +12,7 @@
 
 import { LEVELS, levelById, nextLevelId, worldOf } from '@/shared/levels';
 import type { LobbyPlayer } from '@/shared/types';
+import { controlsGuide, cookFlow } from './controls';
 import { el } from './dom';
 import { LevelPreview } from './preview';
 import { rotateNote } from './rotate';
@@ -188,19 +189,12 @@ export class TutorialScreen implements ScreenView<TutorialProps> {
     head.append(el('p', 'msg tutorial-intro', 'Watch the big screen. Your phone stays a controller.'));
     this.root.appendChild(head);
 
-    const controls = el('div', 'tutorial-controls');
-    const move = el('div', 'tutorial-control');
-    move.append(el('div', 'tutorial-stick', '↗'), el('div', 'tutorial-control__copy', 'DRAG TO MOVE'));
-    const grab = el('div', 'tutorial-control');
-    grab.append(el('div', 'tutorial-button tutorial-button--grab', 'GRAB'), el('div', 'tutorial-control__copy', 'TAP TO PICK UP & PUT DOWN'));
-    const chop = el('div', 'tutorial-control');
-    chop.append(el('div', 'tutorial-button tutorial-button--chop', 'HOLD'), el('div', 'tutorial-control__copy', 'CHOP · DASH · SPRAY'));
-    controls.append(move, grab, chop);
+    // The same picture the lobby folds away under "How to play", drawn big:
+    // here it is the whole point of the screen rather than a reminder.
+    const controls = controlsGuide();
+    controls.classList.add('guide--big');
     this.root.appendChild(controls);
-
-    const recipe = el('div', 'tutorial-recipe');
-    recipe.append(el('span', '', 'ONION'), el('i', '', '→'), el('span', '', 'CHOP'), el('i', '', '→'), el('span', '', 'COOK'), el('i', '', '→'), el('span', '', 'SERVE'));
-    this.root.appendChild(recipe);
+    this.root.appendChild(cookFlow());
 
     const actions = el('div', 'actions');
     const ready = el('button', 'big-btn big-btn--hero', 'GOT IT — LET’S COOK');
@@ -297,20 +291,42 @@ export interface LobbyProps {
   levelId: string;
   onStart: () => void;
   onSelect: (levelId: string) => void;
+  /** Already sanitised, non-empty, and different from the name on the chip. */
+  onRename: (name: string) => void;
 }
+
+/**
+ * Tall enough to hold the how-to open in the column and still fit the roster,
+ * the chooser and the start button without a scroll. Above it the panel sits
+ * in the layout and starts open, because it costs nothing; at or below it the
+ * panel floats over the roster as a sheet and starts folded (`.how` in
+ * controller.css keys off the same number). A sheet covers what is behind it,
+ * so it also has to close like one: the next tap anywhere else puts it away.
+ */
+const HOW_SHEET_MAX_HEIGHT = 820;
 
 export class LobbyScreen implements ScreenView<LobbyProps> {
   readonly root: HTMLElement;
   private props: LobbyProps;
   private readonly dot: HTMLElement;
+  private readonly chip: HTMLButtonElement;
   private readonly chefName: HTMLElement;
+  private readonly nameForm: HTMLFormElement;
+  private readonly nameInput: HTMLInputElement;
   private readonly roomLine: HTMLElement;
-  private readonly count: HTMLElement;
   private readonly roster: HTMLElement;
   private readonly start: HTMLButtonElement;
+  private readonly startNote: HTMLElement;
   private readonly picker: LevelPicker;
   /** What the roster list was last built from; rebuilt only when it changes. */
   private rosterKey = '';
+  private readonly how: HTMLDetailsElement;
+  private readonly sheetQuery: MediaQueryList;
+  private readonly onSheetChange: () => void;
+  /** Installed only while the how-to floats over the screen as a sheet. */
+  private onOutsideTap: ((e: PointerEvent) => void) | null = null;
+  /** True while this chef is typing a new name into the chip. */
+  private editing = false;
 
   constructor(p: LobbyProps) {
     this.props = p;
@@ -319,11 +335,51 @@ export class LobbyScreen implements ScreenView<LobbyProps> {
     const head = el('div', 'lobby-head');
     head.appendChild(el('div', 'lobby-status', 'CONNECTED TO THE BIG SCREEN'));
     head.appendChild(el('h1', 'title', "You're in!"));
-    const chip = el('div', 'chef-chip');
+    // The chip is the rename control: the name a chef wants to change is the
+    // one thing on this screen already big enough to aim a thumb at.
+    this.chip = el('button', 'chef-chip chef-chip--edit');
+    this.chip.type = 'button';
+    this.chip.setAttribute('aria-label', 'Change your chef name');
     this.dot = el('span', 'chef-chip__dot');
     this.chefName = el('span', 'chef-chip__name');
-    chip.append(this.dot, this.chefName);
-    head.appendChild(chip);
+    this.chip.append(this.dot, this.chefName, el('span', 'chef-chip__pen', '✎'));
+    this.chip.addEventListener('click', () => this.beginEdit());
+    head.appendChild(this.chip);
+
+    // The editor stands exactly where the chip stood, rather than opening a
+    // dialog: nothing below it may move while somebody is typing.
+    this.nameForm = el('form', 'rename');
+    this.nameForm.hidden = true;
+    this.nameForm.setAttribute('novalidate', '');
+    this.nameInput = el('input', 'input input--name');
+    this.nameInput.maxLength = MAX_NAME;
+    this.nameInput.placeholder = 'Chef';
+    this.nameInput.setAttribute('aria-label', 'Chef name');
+    this.nameInput.setAttribute('autocomplete', 'nickname');
+    this.nameInput.spellcheck = false;
+    this.nameInput.setAttribute('autocapitalize', 'words');
+    this.nameInput.setAttribute('autocorrect', 'off');
+    this.nameInput.setAttribute('enterkeyhint', 'done');
+    this.nameInput.addEventListener('input', () => {
+      const cleaned = sanitizeName(this.nameInput.value);
+      if (this.nameInput.value !== cleaned) this.nameInput.value = cleaned;
+    });
+    this.nameInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') this.endEdit(false);
+    });
+    // Tapping away keeps what was typed: a phone keyboard that dismisses
+    // itself must not throw the new name away.
+    this.nameInput.addEventListener('blur', () => this.endEdit(true));
+    const save = el('button', 'rename__ok', '✓');
+    save.type = 'submit';
+    save.setAttribute('aria-label', 'Save name');
+    this.nameForm.append(this.nameInput, save);
+    this.nameForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      this.endEdit(true);
+    });
+    head.appendChild(this.nameForm);
+
     this.roomLine = el('p', 'msg');
     head.appendChild(this.roomLine);
     head.appendChild(rotateNote()); // portrait only; asks before the whistle
@@ -331,17 +387,34 @@ export class LobbyScreen implements ScreenView<LobbyProps> {
 
     const rosterWrap = el('div', 'roster-wrap');
     rosterWrap.dataset.scroll = 'true';
-    this.count = el('div', 'roster__count');
+    // A label for the list, not a tally: the head count belongs next to the
+    // start button, where it is a reason to press it.
     this.roster = el('ul', 'roster');
-    rosterWrap.append(this.count, this.roster);
+    rosterWrap.append(el('div', 'roster__count', 'IN THE KITCHEN'), this.roster);
     this.root.appendChild(rosterWrap);
+
+    this.sheetQuery = window.matchMedia(`(max-height: ${HOW_SHEET_MAX_HEIGHT}px)`);
+    this.how = this.howToPlay();
+    // A phone turned on its side changes which of the two the panel is, so it
+    // goes back to what that shape starts with rather than being left as a
+    // sheet nobody asked for — or as a column item there is no room for.
+    this.onSheetChange = () => {
+      this.how.open = !this.isSheet();
+    };
+    this.sheetQuery.addEventListener('change', this.onSheetChange);
+    this.root.appendChild(this.how);
 
     const actions = el('div', 'actions');
     this.picker = new LevelPicker((levelId) => this.props.onSelect(levelId));
-    this.start = el('button', 'big-btn big-btn--hero');
+    this.start = el('button', 'big-btn big-btn--hero big-btn--go');
     this.start.type = 'button';
-    this.start.addEventListener('click', () => this.props.onStart());
-    actions.append(this.picker.root, this.start);
+    this.start.addEventListener('click', () => {
+      // A second tap while the first is in flight starts nothing and looks
+      // broken. The server ignores it, so never send it.
+      if (!this.props.busy) this.props.onStart();
+    });
+    this.startNote = el('p', 'msg start-note');
+    actions.append(this.picker.root, this.start, this.startNote);
     this.root.appendChild(actions);
 
     this.update(p);
@@ -349,17 +422,102 @@ export class LobbyScreen implements ScreenView<LobbyProps> {
 
   update(p: LobbyProps): void {
     this.props = p;
-    setText(this.chefName, p.name);
+    // Never while the chef is typing: this runs on every lobby broadcast, and
+    // the name in props is the old one until the server has agreed.
+    if (!this.editing) setText(this.chefName, p.name);
     if (this.dot.style.background !== p.color) this.dot.style.background = p.color;
     setText(this.roomLine, `Room ${p.room} · look for your colour on the TV`);
     this.setRoster(p.players, p.playerId);
     this.picker.update(p.levelId);
+
+    const chefs = p.players.length;
     setText(this.start, p.busy ? 'STARTING…' : 'START COOKING');
     this.start.disabled = p.busy;
+    setText(
+      this.startNote,
+      p.busy
+        ? 'Firing up the kitchen…'
+        : `Anyone can start · ${chefs} chef${chefs === 1 ? '' : 's'} ready`,
+    );
   }
 
   destroy(): void {
+    this.sheetQuery.removeEventListener('change', this.onSheetChange);
+    this.watchOutsideTap(false);
     this.picker.destroy();
+  }
+
+  /**
+   * The pad, explained where the waiting happens. On a big phone it sits in
+   * the column, open, because it costs nothing there. On anything smaller it
+   * is folded away, and opening it floats it over the roster so the chooser
+   * and the start button never move.
+   */
+  private howToPlay(): HTMLDetailsElement {
+    const how = el('details', 'how');
+    const summary = el('summary', 'how__summary');
+    summary.append(el('span', 'how__label', 'How to play'), el('span', 'how__chevron', '▾'));
+    // One body under the summary: on a short screen the whole of it lifts off
+    // the column as a sheet, and a wrapper is what makes that one rule.
+    const body = el('div', 'how__body');
+    body.append(controlsGuide(), cookFlow());
+    how.append(summary, body);
+    how.open = !this.isSheet();
+    how.addEventListener('toggle', () => this.watchOutsideTap(how.open && this.isSheet()));
+    return how;
+  }
+
+  /** True when the how-to is floating rather than sitting in the column. */
+  private isSheet(): boolean {
+    return this.sheetQuery.matches;
+  }
+
+  /**
+   * While the sheet is up it covers the chef chip and the roster, so anything
+   * a thumb lands on out there means "put this away" — not "nothing happened".
+   */
+  private watchOutsideTap(on: boolean): void {
+    if (on === (this.onOutsideTap !== null)) return;
+    if (on) {
+      this.onOutsideTap = (e: PointerEvent) => {
+        const target = e.target;
+        if (target instanceof Node && this.how.contains(target)) return;
+        this.how.open = false;
+      };
+      // Capture: the tap must close the sheet even where something under it
+      // stops the event on its way back up.
+      document.addEventListener('pointerdown', this.onOutsideTap, true);
+      return;
+    }
+    if (this.onOutsideTap) document.removeEventListener('pointerdown', this.onOutsideTap, true);
+    this.onOutsideTap = null;
+  }
+
+  /* ------------------------------- renaming ------------------------------ */
+
+  private beginEdit(): void {
+    if (this.editing) return;
+    this.editing = true;
+    this.chip.hidden = true;
+    this.nameForm.hidden = false;
+    this.nameInput.value = this.props.name;
+    this.nameInput.focus();
+    this.nameInput.select();
+  }
+
+  /**
+   * Put the chip back. An empty box, an unchanged name, or an Escape sends
+   * nothing: the server's answer would be a broadcast repainting what is
+   * already on the screen.
+   */
+  private endEdit(commit: boolean): void {
+    if (!this.editing) return;
+    this.editing = false;
+    const typed = sanitizeName(this.nameInput.value).trim();
+    this.nameForm.hidden = true;
+    this.chip.hidden = false;
+    setText(this.chefName, this.props.name);
+    if (commit && typed && typed !== this.props.name) this.props.onRename(typed);
   }
 
   private setRoster(players: LobbyPlayer[], playerId: string): void {
@@ -367,7 +525,6 @@ export class LobbyScreen implements ScreenView<LobbyProps> {
     if (key === this.rosterKey) return;
     this.rosterKey = key;
 
-    setText(this.count, `${players.length} chef${players.length === 1 ? '' : 's'} ready`);
     this.roster.textContent = '';
     for (const pl of players) {
       const li = el('li', 'roster__item' + (pl.id === playerId ? ' is-me' : ''));

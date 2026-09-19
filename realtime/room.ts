@@ -710,6 +710,9 @@ export class Room {
       case 'select':
         this.select(link, msg.levelId);
         return;
+      case 'rename':
+        this.rename(link, msg.name);
+        return;
       case 'pause':
       case 'resume':
         this.setPaused(link, msg.t === 'pause');
@@ -893,6 +896,44 @@ export class Room {
     this.sendLobby();
     void this.persist();
     console.log(`[room ${this.code}] level set to ${this.game.levelId}`);
+  }
+
+  /**
+   * Change a chef's name, from that chef's own phone.
+   *
+   * Between rounds only. Mid-service the name is on the TV in the player
+   * label, in the pause card and on every phone's HUD, and a chef quietly
+   * becoming somebody else there is a distraction rather than a feature.
+   *
+   * Everything that carries a name is written from the one seat record: the
+   * roster broadcast, the registry entry a reconnect reclaims the seat from,
+   * and the sim's copy of the label. An empty or junk name keeps the old one,
+   * so the worst a phone can do is repaint what is already on screen.
+   */
+  private rename(link: Link, raw: unknown): void {
+    const pid = this.byConn.get(link.id);
+    const st = pid ? this.seats.get(pid) : undefined;
+    if (!st || this.game.phase === 'playing') return;
+    const name = cleanName(raw, st.seat.name);
+    if (name === st.seat.name) return; // an echo, or a rejected name
+    st.seat.name = name;
+    this.labelPlayer(st.seat.playerId, name);
+    this.sendLobby();
+    void this.persist();
+    console.log(`[room ${this.code}] ${st.seat.playerId} is now ${name}`);
+  }
+
+  /**
+   * Set the sim's copy of a chef's name — what the TV draws under the player.
+   *
+   * `game/` is a pure world that keys everything off the player id and never
+   * reads the name, so a rename is a label change, not a roster change: this
+   * writes the player state the snapshot already exposes rather than tearing
+   * a chef down and building a new one just to change a word.
+   */
+  private labelPlayer(playerId: string, name: string): void {
+    const player = this.game.snapshot.players.find((p) => p.id === playerId);
+    if (player) player.name = name;
   }
 
   /**

@@ -130,6 +130,17 @@ or move the room to the next level. Players may join mid-round and are spawned
 immediately. Every number in brackets above is a per-level override; the
 constants in `shared/types.ts` are only the defaults.
 
+**Names**: `rename {name}` from a seated controller changes that chef's own
+name, between rounds only (`lobby` or `gameover`) — mid-service the name is on
+the TV under the chef, on the pause card and on every phone's HUD, and a chef
+quietly becoming somebody else there is a distraction, not a feature. The name
+is cleaned exactly as a join name is (control characters dropped, trimmed,
+`MAX_NAME_LEN`), and an empty or unchanged one is ignored rather than
+answered. The seat record is the only copy that matters: it feeds the `lobby`
+broadcast every screen reads, the registry entry a reconnect token reclaims
+the seat from, and the sim's label for the player. Duplicate names are allowed
+— colour is what tells two chefs apart.
+
 **Pause**: `pause` / `resume` from any seated controller, `phase === 'playing'`
 only — the host screen has no seat and cannot stop the round. While
 `Snapshot.paused` is non-null every clock in the kitchen freezes (round timer,
