@@ -10,7 +10,11 @@
 
 import type { LobbyPlayer, Phase, Snapshot, Vec2 } from './types';
 
-export type Btn = 'a' | 'b'; // a = pick up / put down, b = chop / dash
+// Both buttons are tracked down as well as tapped: A is pick up / put down,
+// and — empty-handed at a board with something raw on it, where nothing else
+// makes sense — the chop, held down. B is chop / spray while held, dash on a
+// tap. Every press acts on `PlayerState.target`, the tile the TV highlights.
+export type Btn = 'a' | 'b';
 
 // --- client -> server ---
 export type C2S =

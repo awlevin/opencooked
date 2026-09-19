@@ -6,7 +6,7 @@ import type { SnapshotBuffer } from '../state';
 import { chefGlow, drawChefGlow, drawServeFx, fxNow } from './fx';
 import { drawHud } from './hud';
 import { drawPauseOverlay } from './pause';
-import { drawPlayer, drawPlayerLabel } from './players';
+import { drawAim, drawPlayer, drawPlayerLabel } from './players';
 import { drawKitchen } from './tiles';
 import { rr, text, worldToPx } from './theme';
 
@@ -168,6 +168,9 @@ export class GameView {
     // chefs, painted back to front so overlaps read correctly
     const now = fxNow(snap, age);
     const ordered = [...players].sort((a, b) => a.y - b.y);
+    // What each chef is about to act on, over the stations and under everyone,
+    // so a highlight can never cover a face or a held item.
+    drawAim(c, ordered, T, time);
     // A halo under the chef who just landed a perfect one, so the celebration
     // points at a person and not only at the window.
     for (const p of ordered) {

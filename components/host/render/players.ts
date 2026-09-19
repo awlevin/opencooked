@@ -1,8 +1,13 @@
 // Chef blobs: round body, puffy hat, eyes that follow the facing direction,
 // squash-and-stretch on dash, and whatever they are carrying held out front.
+//
+// Also the aim: the chevron in front of a chef and the highlight on the
+// station they are about to act on. Both are the same one fact drawn twice —
+// `PlayerState.target`, straight from the sim — so the tile that lights up is
+// always the tile the button hits.
 
 import { PLAYER_RADIUS } from '@/shared/types';
-import type { RenderPlayer } from '../state';
+import type { AimView, RenderPlayer } from '../state';
 import { drawHeldItem } from './ingredients';
 import {
   PAL,
@@ -57,6 +62,43 @@ function drawChefKnife(c: CanvasRenderingContext2D, s: number): void {
   fillStroke(c, '#3f2a1c', PAL.ink, s * 0.16);
 }
 
+/**
+ * The facing chevron: a small arrow on the floor just in front of the chef, in
+ * their own colour. It is the cheapest possible answer to "which way am I
+ * pointing?", and it brightens as the aim settles on a station, so locking on
+ * is something you see rather than something you find out by pressing.
+ *
+ * It sits far enough out to clear the chef's own hat and whatever they are
+ * carrying — otherwise it vanishes exactly when a chef turns their back on the
+ * camera, which is when you most need it — and just touches the tile ahead, so
+ * the arrow and the highlight it points into read as one thing.
+ */
+function drawChevron(
+  c: CanvasRenderingContext2D,
+  dx: number,
+  dy: number,
+  R: number,
+  color: string,
+  lock: number,
+): void {
+  const len = R * 0.6;
+  const halfW = R * 0.58;
+  c.save();
+  c.translate(dx * R * 1.8, dy * R * 1.8);
+  c.rotate(Math.atan2(dy, dx));
+  c.globalAlpha = 0.5 + 0.45 * lock;
+  c.beginPath();
+  c.moveTo(-len * 0.55, -halfW);
+  c.lineTo(len * 0.7, 0);
+  c.lineTo(-len * 0.55, halfW);
+  // A concave tail turns the triangle into a chevron, which reads as a
+  // direction rather than as a piece of food.
+  c.quadraticCurveTo(-len * 0.16, 0, -len * 0.55, -halfW);
+  c.closePath();
+  fillStroke(c, tint(color, 0.18), PAL.ink, R * 0.085);
+  c.restore();
+}
+
 export function drawPlayer(
   c: CanvasRenderingContext2D,
   p: RenderPlayer,
@@ -75,6 +117,8 @@ export function drawPlayer(
   ellipse(c, 0, R * 0.86, R * 0.92, R * 0.36);
   c.fillStyle = 'rgba(30, 16, 8, 0.35)';
   c.fill();
+
+  drawChevron(c, dx, dy, R, p.color, p.aim ? p.aim.a : 0);
 
   // dash afterimages
   if (p.dashing) {
@@ -235,6 +279,75 @@ export function drawPlayer(
     c.restore();
   }
 
+  c.restore();
+}
+
+/**
+ * Every chef's target station, in their own colour. Drawn over the kitchen and
+ * under the chefs, so a highlight never covers a face.
+ *
+ * Two chefs may want the same counter — which happens constantly around the
+ * one plate stack — so their rings nest instead of stacking, and the tile says
+ * "both of you" rather than showing whichever colour was painted last.
+ */
+export function drawAim(
+  c: CanvasRenderingContext2D,
+  players: readonly RenderPlayer[],
+  T: number,
+  time: number,
+): void {
+  // At most one entry per chef, so this is a handful of slots, not a table.
+  const depth = new Map<number, number>();
+  for (const p of players) {
+    const aim = p.aim;
+    if (!aim) continue;
+    const n = depth.get(aim.idx) ?? 0;
+    depth.set(aim.idx, n + 1);
+    drawAimTile(c, aim, T, p.color, n, time);
+  }
+}
+
+function drawAimTile(
+  c: CanvasRenderingContext2D,
+  aim: AimView,
+  T: number,
+  color: string,
+  depth: number,
+  time: number,
+): void {
+  // Barely breathing: enough that the highlight reads as live from a sofa,
+  // never enough to compete with a pot boiling or a tile on fire.
+  const pulse = 0.9 + 0.1 * Math.sin(time * 3.4 + depth * 1.7);
+  const a = aim.a * pulse;
+  // The station's slab, not the whole cell: a ring around the tile grid would
+  // look like a debug overlay. Each extra chef tucks one ring further in.
+  const i = 0.05 + depth * 0.085;
+  const x = aim.x * T + (0.02 + i) * T;
+  const y = aim.y * T + (0.02 + i) * T;
+  const w = (0.96 - i * 2) * T;
+  const h = (0.9 - i * 2) * T;
+  if (w <= 0 || h <= 0) return;
+
+  c.save();
+  c.translate(0, -T * 0.03); // sit on the counter top, not on its front face
+  rr(c, x, y, w, h, T * 0.15);
+  // A wash of light rather than a coat of paint, so whatever is on the counter
+  // keeps its own colours.
+  c.globalCompositeOperation = 'lighter';
+  c.globalAlpha = a * 0.13;
+  c.fillStyle = color;
+  c.fill();
+  c.globalCompositeOperation = 'source-over';
+  c.globalAlpha = a * 0.95;
+  // Barely lightened: a tinted ring goes pastel on a cream counter, and pastel
+  // is the one thing that does not survive the trip across a living room. The
+  // glow stays tight for the same reason — spread it and it floods the tile,
+  // leaving a pale block where there should be a ring.
+  c.strokeStyle = tint(color, 0.12);
+  c.lineWidth = Math.max(1.5, T * 0.058);
+  c.shadowColor = color;
+  c.shadowBlur = T * 0.1;
+  c.stroke();
   c.restore();
 }
 

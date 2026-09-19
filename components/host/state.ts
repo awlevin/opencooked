@@ -9,6 +9,22 @@ import { SNAPSHOT_MS, type HeldItem, type Snapshot } from '@/shared/types';
 /** How far behind "now" we render, in ms. One packet + a cushion. */
 const INTERP_DELAY_MS = SNAPSHOT_MS + 20;
 
+/**
+ * The station a chef is aiming at, eased. The sim decides *which* tile (it is
+ * `PlayerState.target`, the one the next press acts on); all that happens here
+ * is the easing, so the highlight glides to the counter next door and fades
+ * away instead of popping on and off between packets.
+ */
+export interface AimView {
+  /** Tile index, so two chefs on one counter can be drawn as two chefs. */
+  idx: number;
+  /** Tile coordinates, eased — the highlight slides rather than jumps. */
+  x: number;
+  y: number;
+  /** 0..1 fade-in. */
+  a: number;
+}
+
 export interface RenderPlayer {
   id: string;
   name: string;
@@ -17,6 +33,8 @@ export interface RenderPlayer {
   y: number;
   /** Smoothed facing angle in radians (0 = +x, screen space). */
   angle: number;
+  /** What the sim says this chef's next press will land on, eased. */
+  aim: AimView | null;
   held: HeldItem | null;
   chopping: boolean;
   /** Holding the extinguisher trigger (the renderer draws the foam). */
@@ -42,6 +60,8 @@ interface Stamped {
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
+/** Frame-rate independent approach factor: `rate` is roughly 1/seconds. */
+const ease = (dt: number, rate: number) => 1 - Math.exp(-dt * rate);
 
 /** Shortest-arc interpolation between two angles. */
 function lerpAngle(a: number, b: number, t: number): number {
@@ -55,6 +75,8 @@ export class SnapshotBuffer {
   private cur: Stamped | null = null;
   /** Persistent per-player facing so rotation eases instead of snapping. */
   private angles = new Map<string, number>();
+  /** Persistent per-player aim, so the target highlight glides and fades. */
+  private aims = new Map<string, AimView>();
   private lastSampleAt = 0;
   /** Asked per frame, so the badge is never a stale copy of the truth. */
   private localCheck: (playerId: string) => boolean = () => false;
@@ -79,6 +101,7 @@ export class SnapshotBuffer {
     this.prev = null;
     this.cur = null;
     this.angles.clear();
+    this.aims.clear();
   }
 
   get latest(): Snapshot | null {
@@ -138,6 +161,7 @@ export class SnapshotBuffer {
         x,
         y,
         angle,
+        aim: this.aimOf(p.id, p.target, cur.s.w, dt),
         held: p.held,
         chopping: p.chopping,
         spraying: p.spraying === true,
@@ -150,6 +174,9 @@ export class SnapshotBuffer {
     for (const id of this.angles.keys()) {
       if (!live.has(id)) this.angles.delete(id);
     }
+    for (const id of this.aims.keys()) {
+      if (!live.has(id)) this.aims.delete(id);
+    }
 
     // `age` only smooths the countdowns between packets. Cap it so a stalled
     // socket cannot run the round clock and order bars down to zero. Paused,
@@ -157,5 +184,38 @@ export class SnapshotBuffer {
     // overlay animates from it) and is expected not to spend it on clocks.
     const age = clamp(now - cur.t, 0, 400);
     return { snap: cur.s, players, age };
+  }
+
+  /**
+   * Ease one chef's target highlight. The tile is the sim's; the glide and the
+   * fade are ours, and both are frame-rate independent so a 60 Hz laptop and a
+   * 120 Hz one look the same.
+   */
+  private aimOf(id: string, target: number | null, w: number, dt: number): AimView | null {
+    let aim = this.aims.get(id);
+    if (target !== null && w > 0) {
+      const tx = target % w;
+      const ty = Math.floor(target / w);
+      if (!aim) {
+        aim = { idx: target, x: tx, y: ty, a: 0 };
+        this.aims.set(id, aim);
+      } else if (aim.idx !== target) {
+        // The ring never travels between tiles. Sliding it looked charming in
+        // motion and wrong in a single frame — half of it over one counter and
+        // half over the next, which is exactly the ambiguity this whole
+        // feature exists to remove. So it moves outright and dips instead,
+        // and the re-brightening below reads as the move.
+        aim.idx = target;
+        aim.x = tx;
+        aim.y = ty;
+        aim.a = Math.min(aim.a, 0.4);
+      }
+      aim.a = lerp(aim.a, 1, ease(dt, 18));
+    } else if (aim) {
+      aim.a = lerp(aim.a, 0, ease(dt, 11));
+    }
+    // Below a whisker of alpha there is nothing to draw, and saying so here
+    // keeps the "is anyone aiming at this tile" test in the renderer trivial.
+    return aim && aim.a > 0.02 ? aim : null;
   }
 }
