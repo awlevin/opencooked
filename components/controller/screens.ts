@@ -14,6 +14,7 @@ import { LEVELS, levelById, nextLevelId, worldOf } from '@/shared/levels';
 import type { LobbyPlayer } from '@/shared/types';
 import { el } from './dom';
 import { LevelPreview } from './preview';
+import { rotateNote } from './rotate';
 
 export const MAX_NAME = 12;
 export const MAX_CODE = 4;
@@ -325,6 +326,7 @@ export class LobbyScreen implements ScreenView<LobbyProps> {
     head.appendChild(chip);
     this.roomLine = el('p', 'msg');
     head.appendChild(this.roomLine);
+    head.appendChild(rotateNote()); // portrait only; asks before the whistle
     this.root.appendChild(head);
 
     const rosterWrap = el('div', 'roster-wrap');

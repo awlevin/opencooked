@@ -22,9 +22,20 @@
   --accent-faint: rgba(241, 196, 15, 0.16);
   --accent-hairline: rgba(241, 196, 15, 0.32);
 
-  --btn: clamp(96px, min(28vw, 30vh), 168px);
+  /* The action discs. GRAB is the verb of the whole game, so it is the bigger
+     of the two and sits lowest, where the thumb already rests; CHOP steps up
+     and in along the same arc. Both are measured off the short edge of the
+     screen — the one a landscape phone has least of — so a 375 pt phone and a
+     tablet each get a disc the thumb can find without looking. */
+  --btn-a: clamp(124px, 40vmin, 200px);
+  --btn-b: calc(var(--btn-a) * 0.84);
+  /* Dead space around each disc that still counts as a press. */
+  --btn-halo: clamp(9px, 2.4vmin, 18px);
+
   --pad-x: max(14px, env(safe-area-inset-left));
   --pad-r: max(14px, env(safe-area-inset-right));
+  --pad-t: max(12px, env(safe-area-inset-top));
+  --pad-b: max(16px, env(safe-area-inset-bottom));
 
   color-scheme: dark;
 }
@@ -69,9 +80,7 @@ body {
 .stage {
   position: absolute;
   inset: 0;
-  padding:
-    max(12px, env(safe-area-inset-top)) var(--pad-r)
-    max(16px, env(safe-area-inset-bottom)) var(--pad-x);
+  padding: var(--pad-t) var(--pad-r) var(--pad-b) var(--pad-x);
 }
 
 .screen {
@@ -771,9 +780,11 @@ body {
   opacity: 0;
 }
 
+/* Drawn the size the stick actually appears at, and never bigger: a ring that
+   promises more travel than the thumb has is a lie the first drag exposes. */
 .stick-hint__ring {
-  width: 132px;
-  height: 132px;
+  width: clamp(112px, 34vmin, 176px);
+  height: clamp(112px, 34vmin, 176px);
   border-radius: 50%;
   border: 2px dashed rgba(255, 255, 255, 0.14);
 }
@@ -847,17 +858,13 @@ body {
   touch-action: none;
 }
 
-/* Diagonal cluster: CHOP sits up-and-left of GRAB, on the thumb's natural arc. */
-.pad-btn--b {
-  margin-right: calc(var(--btn) * 0.38);
-}
-
 .pad-btn {
+  position: relative;
   appearance: none;
   -webkit-appearance: none;
   border: none;
-  width: var(--btn);
-  height: var(--btn);
+  width: var(--btn-a);
+  height: var(--btn-a);
   border-radius: 50%;
   font: inherit;
   color: #0d1017;
@@ -865,7 +872,7 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1px;
+  gap: 2px;
   touch-action: none;
   transition:
     transform 70ms ease,
@@ -873,18 +880,51 @@ body {
     filter 70ms ease;
 }
 
+/* CHOP is the smaller disc and sits up-and-left of GRAB, on the arc the thumb
+   swings through anyway. It has to come after the base rule: both selectors
+   weigh the same, so source order is what decides the size. */
+.pad-btn--b {
+  width: var(--btn-b);
+  height: var(--btn-b);
+  margin-right: calc(var(--btn-a) * 0.38);
+}
+
+/* The hit area is wider than the disc: a thumb aiming at a button it cannot
+   look at lands wide of it, and a near miss that does nothing is the most
+   expensive kind of miss in a 180-second round. The two halos meet in the gap
+   between the buttons, and GRAB is painted last, so the seam belongs to GRAB
+   — the press a player is far more likely to have meant. */
+.pad-btn::before {
+  content: '';
+  position: absolute;
+  inset: calc(var(--btn-halo) * -1);
+  border-radius: 50%;
+}
+
+/* Labels are a fraction of their own disc, so the whole button scales as one
+   object from a small phone to a tablet. */
 .pad-btn__label {
-  font-size: clamp(17px, 4.6vmin, 26px);
+  font-size: calc(var(--btn-a) * 0.2);
   letter-spacing: 0.06em;
   line-height: 1;
 }
 
+.pad-btn--b .pad-btn__label {
+  font-size: calc(var(--btn-b) * 0.2);
+}
+
+/* One word, because a disc is a terrible place for a sentence: the pad says
+   how the button is played, and the quick-start screen says what it does. */
 .pad-btn__sub {
-  font-size: clamp(9px, 2.2vmin, 12px);
-  letter-spacing: 0.2em;
-  margin-right: -0.2em;
+  font-size: calc(var(--btn-a) * 0.085);
+  letter-spacing: 0.24em;
+  margin-right: -0.24em;
   opacity: 0.55;
   line-height: 1;
+}
+
+.pad-btn--b .pad-btn__sub {
+  font-size: calc(var(--btn-b) * 0.095);
 }
 
 .pad-btn--a {
@@ -913,6 +953,38 @@ body {
 .pad-btn:active {
   transform: translateY(8px) scale(0.96);
   filter: brightness(1.2) saturate(1.15);
+}
+
+/* A ring snapping out of the disc on every press. iOS Safari has no vibration
+   API at all, so on half the phones at a table this ring *is* the answer to a
+   press — it has to be unmissable in peripheral vision. */
+.pad-btn::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 3px solid var(--accent-bright);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pad-btn--b::after {
+  border-color: rgba(255, 255, 255, 0.55);
+}
+
+.pad-btn.is-pressed::after {
+  animation: btn-ring 340ms ease-out;
+}
+
+@keyframes btn-ring {
+  from {
+    opacity: 0.7;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.22);
+  }
 }
 
 .pad-btn.is-pressed .pad-btn__label,
@@ -1211,9 +1283,20 @@ body {
   }
 }
 
-/* Portrait: the phone is held low, so drop both control clusters into thumb
-   reach instead of leaving them stranded mid-screen. */
+/* Portrait: the pad is playable but cramped — half the width for two thumbs
+   that now sit on top of each other — so the hint above asks for a rotation
+   and this keeps the pad honest for the player who cannot give one. The phone
+   is held low, so both clusters drop into thumb reach, and the discs come in
+   a size to leave the diagonal cluster inside its half. */
 @media (orientation: portrait) {
+  :root {
+    --btn-a: clamp(104px, 33vmin, 150px);
+  }
+
+  .pad-btn--b {
+    margin-right: calc(var(--btn-a) * 0.3);
+  }
+
   .stick-zone,
   .btn-zone {
     justify-content: flex-end;
@@ -1221,7 +1304,7 @@ body {
   }
 
   .stick-hint {
-    margin-bottom: calc(var(--btn) * 0.35);
+    margin-bottom: calc(var(--btn-a) * 0.35);
   }
 }
 
@@ -1232,23 +1315,15 @@ body {
     padding: 3px 12px 3px 6px;
   }
 
-  .stick-hint__ring {
-    width: 108px;
-    height: 108px;
-  }
-
   /* The buttons are centred here rather than dropped to the bottom, so shrink
-     pause, tuck it into the corner, and push the cluster down off it. */
+     pause and tuck it into the corner: the cluster now fills nearly the whole
+     height and has none to spare for a button nobody presses on purpose. */
   .pad-pause {
     top: 0;
     right: 0;
     width: 48px;
     height: 48px;
     font-size: 15px;
-  }
-
-  .btn-zone {
-    padding-top: 44px;
   }
 }
 
@@ -1391,4 +1466,206 @@ body {
 :focus-visible {
   outline: 3px solid var(--accent-bright);
   outline-offset: 3px;
+}
+
+/* ---------------------------- turn your phone ---------------------------- */
+
+/* Both hints are present only in portrait, and that is a media query rather
+   than a listener: turning the phone answers them on the same frame, with no
+   resize maths to fall out of step with the screen. */
+.rotate {
+  display: none;
+}
+
+/* A hint the player has waived. Two classes, so it outweighs the media rules
+   below and stays gone however the phone is turned afterwards. */
+.rotate[hidden] {
+  display: none;
+}
+
+@media (orientation: portrait) {
+  .rotate--note {
+    display: inline-flex;
+  }
+}
+
+/* The overlay is for a phone held upright, where the two thumbs end up in the
+   same corner. A tablet in portrait is still a wide, comfortable pad, and
+   telling someone to turn a tablet they are holding fine is just rude — the
+   lobby's note above is nudge enough. */
+@media (orientation: portrait) and (max-width: 600px) {
+  .rotate--overlay {
+    display: flex;
+  }
+}
+
+/* The pad's hint covers the pad, because a pad held upright is the thing being
+   reported. It breaks out of the stage's safe-area padding so the scrim reaches
+   the glass, and it sits above the HUD and the pause button. */
+.rotate--overlay {
+  position: absolute;
+  inset: calc(var(--pad-t) * -1) calc(var(--pad-r) * -1) calc(var(--pad-b) * -1)
+    calc(var(--pad-x) * -1);
+  z-index: 4;
+  align-items: center;
+  justify-content: center;
+  background: rgba(7, 9, 16, 0.92);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  animation: fade-in 240ms ease both;
+}
+
+.rotate__box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  max-width: min(340px, 84%);
+  padding: 0 var(--pad-x);
+  text-align: center;
+}
+
+.rotate__glyph {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 108px;
+  height: 108px;
+}
+
+.rotate__glyph::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px dashed var(--accent-hairline);
+}
+
+/* The whole hint, really: a phone that turns, waits a beat on its side — the
+   way you want it held — and goes back to ask again. */
+.rotate__phone {
+  width: 46px;
+  height: 76px;
+  border-radius: 12px;
+  border: 3px solid var(--accent);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(0, 0, 0, 0.3));
+  box-shadow: 0 0 26px var(--accent-glow);
+  animation: rotate-phone 2800ms cubic-bezier(0.62, 0, 0.2, 1) infinite;
+}
+
+@keyframes rotate-phone {
+  0%,
+  14% {
+    transform: rotate(0deg);
+  }
+  36%,
+  82% {
+    transform: rotate(-90deg);
+  }
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+.rotate__title {
+  font-size: clamp(19px, 5.4vw, 26px);
+  letter-spacing: 0.14em;
+  margin-right: -0.14em;
+  color: var(--ink);
+}
+
+.rotate__copy {
+  margin: -8px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+/* The way past the hint. A phone with rotation lock on cannot answer it, and
+   nothing on this screen may keep a chef out of the kitchen. */
+.rotate__waive {
+  appearance: none;
+  -webkit-appearance: none;
+  min-height: 46px;
+  padding: 12px 22px;
+  border-radius: 999px;
+  border: 1px solid var(--edge);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  touch-action: manipulation;
+  transition:
+    transform 90ms ease,
+    color 160ms ease,
+    background 160ms ease;
+}
+
+.rotate__waive:active {
+  transform: scale(0.96);
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* The lobby's hint is a line, not a wall: nobody is cooking yet, so it only
+   asks people to turn the phone before the whistle goes. */
+.rotate--note {
+  align-items: center;
+  gap: 7px;
+  padding: 3px 12px 3px 5px;
+  border-radius: 999px;
+  background: var(--accent-faint);
+  border: 1px dashed var(--accent-hairline);
+  color: var(--accent-bright);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+
+.rotate--note .rotate__glyph {
+  width: 20px;
+  height: 20px;
+}
+
+.rotate--note .rotate__glyph::before {
+  display: none;
+}
+
+.rotate--note .rotate__phone {
+  width: 14px;
+  height: 22px;
+  border-width: 2px;
+  border-radius: 5px;
+  box-shadow: none;
+}
+
+/* Short portrait windows (a phone held upright is not short, but a desktop
+   window can be): the glyph goes, the words stay. */
+@media (orientation: portrait) and (max-height: 520px) {
+  .rotate--overlay .rotate__glyph {
+    display: none;
+  }
+}
+
+@media (orientation: portrait) {
+  /* The note has to pay for itself: held upright, the lobby is already exactly
+     as tall as its own contents on a 667 pt phone, so the rhythm around it
+     tightens by about what the pill costs. */
+  .screen--lobby {
+    gap: 10px;
+  }
+
+  .lobby-head {
+    gap: 7px;
+  }
+
+  /* And a roster with more chefs than room is a scroll, not a bug — so let it
+     look like one: the last card fades out under the kitchen chooser instead
+     of being guillotined. Invisible whenever the list already fits. */
+  .roster-wrap {
+    -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 16px), transparent 100%);
+    mask-image: linear-gradient(180deg, #000 calc(100% - 16px), transparent 100%);
+  }
 }

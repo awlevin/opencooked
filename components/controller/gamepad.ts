@@ -5,6 +5,8 @@
 import type { Btn } from '@/shared/protocol';
 import type { Vec2 } from '@/shared/types';
 import { el } from './dom';
+import { lockLandscape, tick, unlockOrientation } from './platform';
+import { rotateOverlay } from './rotate';
 
 const MOVE_INTERVAL_MS = 33; // ~30 Hz
 const DEAD_ZONE_PX = 8;
@@ -64,6 +66,7 @@ export class GamepadView {
     const onPause = (e: PointerEvent) => {
       e.preventDefault();
       e.stopPropagation();
+      tick();
       this.cb.onPause();
     };
     pause.addEventListener('pointerdown', onPause);
@@ -88,15 +91,23 @@ export class GamepadView {
     pad.appendChild(this.stickZone);
 
     // --- right: buttons ---
+    // B goes in first: it is the smaller disc and sits up-and-left of GRAB, so
+    // GRAB paints last and wins wherever the two hit areas meet. One word under
+    // each label says how the button is played; what it *does* is the
+    // quick-start screen's job, because nobody reads a sentence mid-service.
     const btnZone = el('div', 'btn-zone');
-    const b = this.makeButton('b', 'CHOP', 'HOLD · DASH · SPRAY');
-    const a = this.makeButton('a', 'GRAB', 'PICK UP · PUT DOWN');
-    btnZone.appendChild(b);
-    btnZone.appendChild(a);
+    btnZone.appendChild(this.makeButton('b', 'CHOP', 'HOLD'));
+    btnZone.appendChild(this.makeButton('a', 'GRAB', 'TAP'));
     pad.appendChild(btnZone);
+
+    // Held upright the pad is unplayable, so say so — over the pad, and with a
+    // way past it for the phone whose rotation is locked.
+    this.root.appendChild(rotateOverlay());
 
     this.wireStick();
     this.wireSafetyReleases();
+    // A gift from the phones that allow it; everything else ignores us.
+    lockLandscape();
   }
 
   /* ------------------------------ buttons ------------------------------- */
@@ -118,6 +129,10 @@ export class GamepadView {
         /* capture is a nicety */
       }
       node.classList.add('is-pressed');
+      // Local and immediate: the thumb is answered on this frame, not on the
+      // round trip. The server's own buzz still lands on top when the kitchen
+      // agrees something happened.
+      tick();
       this.cb.onPress(btn);
       e.preventDefault();
       e.stopPropagation();
@@ -178,6 +193,9 @@ export class GamepadView {
       this.stickBase.style.top = `${e.clientY - rect.top}px`;
       this.stickBase.classList.add('is-active');
       this.hint.classList.add('is-hidden');
+      // Lighter than a button: the stick is picked up far more often than it
+      // is pressed, and it should feel like the thumb found it, not like news.
+      tick('touch');
       this.moveThumb({ x: 0, y: 0 });
       this.queueMove({ x: 0, y: 0 }, true);
       e.preventDefault();
@@ -324,6 +342,7 @@ export class GamepadView {
   destroy(): void {
     this.releaseAll();
     this.destroyed = true;
+    unlockOrientation();
     this.cancelFlush();
     for (const d of this.disposers) d();
     this.disposers.length = 0;
