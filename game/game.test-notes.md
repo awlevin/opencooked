@@ -1,6 +1,6 @@
 # Deliberate deviations from SPEC.md
 
-Everything else follows §Game rules and the Button A table exactly. These six
+Everything else follows §Game rules and the Button A table exactly. These
 points either fill a gap in the spec or fix a soft-lock.
 
 ## 1. A plate may be put down on an empty plain counter
@@ -47,7 +47,17 @@ the input landed. Score is unchanged (0 points), as specified.
 `any item | trash` with a clean plate has nothing to discard (the plate is
 kept either way), so the action is ignored and no buzz is sent.
 
-## 6. `PORT` environment override
+## 6. Only the catalogue decides what the knife is for
+
+The chop rules say "an unchopped ingredient", which taken literally lets a
+chef chop a bun — a no-op, since `isReady` only asks for the preparations the
+ingredient's definition names. Harmless while B was the only knife; a
+soft-lock once A is one too, because a bun that afforded chopping would be a
+bun that could never be picked back off the board. So `Game.choppable` asks
+the catalogue (`INGREDIENTS[type].chop`) as well as the state of the piece,
+and both buttons read the same predicate.
+
+## 7. `PORT` environment override
 
 `server/index.ts` listens on `Number(process.env.PORT) || SERVER_PORT`. The
 default is still the contract value 3117; the override exists only so a test

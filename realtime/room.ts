@@ -958,6 +958,8 @@ export class Room {
     // Mid-round the body stays on the floor until the grace period is up, so
     // a phone that slept for ten seconds does not cost the team a chef.
     this.game.setMove(playerId, { x: 0, y: 0 });
+    // Both buttons: either one held down is a chef who would chop forever.
+    this.game.release(playerId, 'a');
     this.game.release(playerId, 'b');
     console.log(
       `[room ${this.code}] ${st.seat.name} disconnected — seat held for ` +

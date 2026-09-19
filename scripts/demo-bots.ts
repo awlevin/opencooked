@@ -158,11 +158,13 @@ function tileOf(pos: Vec2): Vec2 {
   return best;
 }
 
-/** Server-identical interaction target: round(pos + dir), clamped to the grid. */
-function targetIdx(p: PlayerState): number {
-  const tx = Math.min(W - 1, Math.max(0, Math.round(p.pos.x + p.dir.x)));
-  const ty = Math.min(H - 1, Math.max(0, Math.round(p.pos.y + p.dir.y)));
-  return idxOf(tx, ty);
+/**
+ * What this bot's next press will act on. The sim aims for us and publishes
+ * the answer, so a bot that waits for `target` to be the station it wants is
+ * asking exactly the question a player asks of the highlight on the TV.
+ */
+function targetIdx(p: PlayerState): number | null {
+  return p.target;
 }
 
 // --- station catalogue (static, from the level) ---
