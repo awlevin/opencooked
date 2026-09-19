@@ -75,6 +75,61 @@ async function lobbyRoom(): Promise<{
   return { room, host, phone, store, ctx };
 }
 
+/**
+ * A room sitting on the results screen, stood up the way a resumed host
+ * would: a finished round in the checkpoint and its seats in the registry.
+ * Running a real round out here would take the round's three minutes.
+ */
+async function gameoverRoom(levelId = 'home-2'): Promise<{
+  room: Room;
+  host: TestLink;
+  phone: TestLink;
+  store: Store;
+  ctx: RoomCtx;
+}> {
+  const store = new MemoryStore(ROOM_TTL_MS);
+  const ctx = context(store);
+  const over = new Game({ seed: 1, levelId });
+  over.addPlayer('p1', 'Alice', '#fff');
+  over.start();
+  // A tick integrates at most MAX_DT_MS, so run the clock out in slices.
+  for (let i = 0; i < 1000 && over.phase === 'playing'; i++) over.tick(250);
+  assert.equal(over.phase, 'gameover');
+
+  const rec = {
+    code: 'ABCD',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    phase: 'gameover' as const,
+    seq: 2,
+    seats: [
+      {
+        playerId: 'p1',
+        name: 'Alice',
+        color: '#fff',
+        // Seat tokens are base64url and at least 8 characters; a shorter
+        // string is junk to `asToken` and would reclaim nothing.
+        token: 'seat-token-1',
+        connected: false,
+        disconnectedAt: null,
+      },
+    ],
+    levelId,
+    owner: null,
+    hostConnected: false,
+  };
+  await store.createRoom(rec);
+  await store.putSnapshot(rec.code, over.snapshot);
+
+  const room = (await Room.adopt(ctx, rec))!;
+  const host = new TestLink('host');
+  room.attachHost(host, true);
+  const phone = new TestLink('phone');
+  room.handleMessage(phone, { t: 'join', room: rec.code, name: 'Alice', token: 'seat-token-1' });
+  assert.equal(phone.last('joined')?.playerId, 'p1');
+  return { room, host, phone, store, ctx };
+}
+
 test('the lobby broadcast carries the chosen level', async () => {
   const { room, host, phone } = await lobbyRoom();
   assert.equal(host.last('lobby')?.levelId, DEFAULT_LEVEL_ID);
@@ -132,45 +187,8 @@ test('the choice survives a host resume', async () => {
 });
 
 test('"next level" is Play Again with a destination', async () => {
-  // Stand a room up straight into gameover, the way a resumed host would.
-  const store = new MemoryStore(ROOM_TTL_MS);
-  const ctx = context(store);
-  const over = new Game({ seed: 1, levelId: 'home-2' });
-  over.addPlayer('p1', 'Alice', '#fff');
-  over.start();
-  // A tick integrates at most MAX_DT_MS, so run the clock out in slices.
-  for (let i = 0; i < 1000 && over.phase === 'playing'; i++) over.tick(250);
-  assert.equal(over.phase, 'gameover');
-
-  const rec = {
-    code: 'ABCD',
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    phase: 'gameover' as const,
-    seq: 2,
-    seats: [
-      {
-        playerId: 'p1',
-        name: 'Alice',
-        color: '#fff',
-        token: 'tok',
-        connected: false,
-        disconnectedAt: null,
-      },
-    ],
-    levelId: 'home-2',
-    owner: null,
-    hostConnected: false,
-  };
-  await store.createRoom(rec);
-  await store.putSnapshot(rec.code, over.snapshot);
-
-  const room = (await Room.adopt(ctx, rec))!;
+  const { room, host, phone } = await gameoverRoom('home-2');
   assert.equal(room.snapshot.levelId, 'home-2');
-  const host = new TestLink('host');
-  room.attachHost(host, true);
-  const phone = new TestLink('phone');
-  room.handleMessage(phone, { t: 'join', room: rec.code, name: 'Alice', token: 'tok' });
 
   // The results are still on screen: the level only moves through "again".
   room.handleMessage(phone, { t: 'select', levelId: 'sushi-1' });
@@ -181,6 +199,102 @@ test('"next level" is Play Again with a destination', async () => {
   assert.equal(room.snapshot.levelId, 'home-3');
   assert.equal(host.last('lobby')?.levelId, 'home-3');
   room.destroy('done');
+});
+
+/* --------------------------------- rename -------------------------------- */
+
+/** One chef's name as the roster last broadcast it. */
+const rosterName = (link: TestLink, playerId: string): string | undefined =>
+  link.last('lobby')?.players.find((p) => p.id === playerId)?.name;
+
+/** The same chef's name as the sim carries it — what the TV draws on the floor. */
+const simName = (room: Room, playerId: string): string | undefined =>
+  room.snapshot.players.find((p) => p.id === playerId)?.name;
+
+test('a chef renames themselves and every screen follows', async () => {
+  const { room, host, phone } = await lobbyRoom();
+  const me = phone.last('joined')!.playerId;
+  assert.equal(rosterName(host, me), 'Alice');
+
+  room.handleMessage(phone, { t: 'rename', name: '  Chef Ali  ' });
+  assert.equal(rosterName(host, me), 'Chef Ali');
+  assert.equal(rosterName(phone, me), 'Chef Ali');
+  // The label the TV draws under the chef comes from the sim, not the roster.
+  assert.equal(simName(room, me), 'Chef Ali');
+
+  // Rapid renames are just writes; the last one wins.
+  room.handleMessage(phone, { t: 'rename', name: 'Ali' });
+  room.handleMessage(phone, { t: 'rename', name: 'Al' });
+  assert.equal(rosterName(host, me), 'Al');
+  assert.equal(simName(room, me), 'Al');
+  room.destroy('done');
+});
+
+test('a rename nobody can use changes nothing', async () => {
+  const { room, phone } = await lobbyRoom();
+  const me = phone.last('joined')!.playerId;
+  const before = phone.sent.length;
+
+  for (const name of ['', '   ', '\u0007\u0007', 42, null, undefined]) {
+    room.handleMessage(phone, { t: 'rename', name });
+  }
+  // Same name in, same name out: an echo must not cost a broadcast.
+  room.handleMessage(phone, { t: 'rename', name: 'Alice' });
+  assert.equal(rosterName(phone, me), 'Alice');
+  assert.equal(phone.sent.length, before);
+
+  // A stranger's socket holds no seat, so it renames nobody.
+  const stranger = new TestLink('stranger');
+  room.handleMessage(stranger, { t: 'rename', name: 'Mallory' });
+  assert.equal(rosterName(phone, me), 'Alice');
+  room.destroy('done');
+});
+
+test('a name changes between rounds, never during one', async () => {
+  const { room, phone } = await lobbyRoom();
+  const me = phone.last('joined')!.playerId;
+
+  room.handleMessage(phone, { t: 'start' });
+  assert.equal(room.phase, 'playing');
+  room.handleMessage(phone, { t: 'rename', name: 'Mid Round' });
+  assert.equal(rosterName(phone, me), 'Alice');
+  assert.equal(simName(room, me), 'Alice');
+  room.destroy('done');
+
+  // The results screen is between rounds, so it is fair game there.
+  const over = await gameoverRoom();
+  over.room.handleMessage(over.phone, { t: 'rename', name: 'Closer' });
+  assert.equal(rosterName(over.phone, 'p1'), 'Closer');
+  assert.equal(simName(over.room, 'p1'), 'Closer');
+  over.room.destroy('done');
+});
+
+test('a renamed seat survives a reconnect and a host resume', async () => {
+  const { room, phone, store, ctx } = await lobbyRoom();
+  const code = room.code;
+  const me = phone.last('joined')!.playerId;
+  const token = phone.last('joined')!.token;
+  room.handleMessage(phone, { t: 'rename', name: 'Abri' });
+  await sleep(30); // the registry write is fire-and-forget
+
+  // The phone reloaded: its token reclaims the seat under the new name.
+  const again = new TestLink('phone2');
+  room.handleMessage(again, { t: 'join', room: code, name: 'Alice', token });
+  assert.equal(again.last('joined')?.playerId, me);
+  assert.equal(again.last('joined')?.name, 'Abri');
+
+  const rec = await store.getRoom(code);
+  assert.equal(rec?.seats.find((s) => s.playerId === me)?.name, 'Abri');
+
+  // The host's function died and the page came back somewhere else.
+  room.standDown();
+  const resumed = await Room.adopt(ctx, rec!);
+  assert.ok(resumed);
+  const host2 = new TestLink('host2');
+  resumed.attachHost(host2, true);
+  assert.equal(rosterName(host2, me), 'Abri');
+  assert.equal(simName(resumed, me), 'Abri');
+  resumed.destroy('done');
 });
 
 /**
