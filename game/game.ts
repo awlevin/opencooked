@@ -506,6 +506,12 @@ export class Game {
     return s;
   }
 
+  /** A rename is a label change: the sim keys everything off the id. */
+  renamePlayer(id: string, name: string): void {
+    const rt = this.rts.get(id);
+    if (rt) rt.s.name = name;
+  }
+
   removePlayer(id: string): void {
     const rt = this.rts.get(id);
     if (!rt) return;

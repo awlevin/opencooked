@@ -1882,3 +1882,15 @@ test('the aim only ever promises what a press can deliver', () => {
     }
   }
 });
+
+test('renamePlayer changes the label and nothing else', () => {
+  const h = harness(2);
+  const before = structuredClone(h.g.snapshot.players);
+  h.g.renamePlayer('p1', 'Abri');
+  h.g.renamePlayer('nobody', 'Ghost'); // an unknown id is a no-op
+  const after = h.g.snapshot.players;
+  assert.equal(after.length, 2);
+  assert.equal(after[1]!.name, 'Abri');
+  assert.deepEqual({ ...after[1]!, name: before[1]!.name }, before[1]);
+  assert.deepEqual(after[0], before[0]);
+});

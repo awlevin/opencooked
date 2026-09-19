@@ -917,23 +917,10 @@ export class Room {
     const name = cleanName(raw, st.seat.name);
     if (name === st.seat.name) return; // an echo, or a rejected name
     st.seat.name = name;
-    this.labelPlayer(st.seat.playerId, name);
+    this.game.renamePlayer(st.seat.playerId, name);
     this.sendLobby();
     void this.persist();
     console.log(`[room ${this.code}] ${st.seat.playerId} is now ${name}`);
-  }
-
-  /**
-   * Set the sim's copy of a chef's name — what the TV draws under the player.
-   *
-   * `game/` is a pure world that keys everything off the player id and never
-   * reads the name, so a rename is a label change, not a roster change: this
-   * writes the player state the snapshot already exposes rather than tearing
-   * a chef down and building a new one just to change a word.
-   */
-  private labelPlayer(playerId: string, name: string): void {
-    const player = this.game.snapshot.players.find((p) => p.id === playerId);
-    if (player) player.name = name;
   }
 
   /**
