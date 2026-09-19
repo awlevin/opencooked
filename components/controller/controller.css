@@ -1680,7 +1680,7 @@ body {
    in the column, because there is no height to give it. `screens.ts` pairs
    with this number: above it the panel sits in the column and starts open.
    Opening it must never move the chooser or the start button. */
-@media (max-height: 820px) {
+@media (max-height: 880px) {
   .how {
     position: relative;
   }
@@ -1720,7 +1720,7 @@ body {
 
 /* A narrow phone held upright: three columns turn the copy into confetti, and
    the sheet floats, so it can afford to be three rows instead. */
-@media (max-height: 820px) and (max-width: 430px) {
+@media (max-height: 880px) and (max-width: 430px) {
   .how__body .guide {
     grid-template-columns: 1fr;
   }

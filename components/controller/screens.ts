@@ -303,7 +303,7 @@ export interface LobbyProps {
  * controller.css keys off the same number). A sheet covers what is behind it,
  * so it also has to close like one: the next tap anywhere else puts it away.
  */
-const HOW_SHEET_MAX_HEIGHT = 820;
+const HOW_SHEET_MAX_HEIGHT = 880;
 
 export class LobbyScreen implements ScreenView<LobbyProps> {
   readonly root: HTMLElement;
@@ -521,7 +521,7 @@ export class LobbyScreen implements ScreenView<LobbyProps> {
   }
 
   private setRoster(players: LobbyPlayer[], playerId: string): void {
-    const key = players.map((p) => `${p.id} ${p.name} ${p.color}`).join('') + `|${playerId}`;
+    const key = players.map((p) => `${p.id}\u0000${p.name}\u0000${p.color}`).join('\u0001') + `|${playerId}`;
     if (key === this.rosterKey) return;
     this.rosterKey = key;
 
