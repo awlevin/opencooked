@@ -80,6 +80,13 @@ export interface PlayerState {
   chopping: boolean; // true while actively chopping (renderer animates)
   spraying: boolean; // true while the extinguisher trigger is held
   dashMsLeft: number; // >0 while dashing
+  /**
+   * The tile index this chef's next button press will act on, or null when
+   * nothing is in reach. The sim picks it (see Game's aiming section) and the
+   * renderer only highlights it: deriving it twice is how a screen ends up
+   * promising a counter the press does not land on.
+   */
+  target: number | null;
 }
 
 export interface Order {

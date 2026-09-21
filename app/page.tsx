@@ -102,8 +102,28 @@ function HostScreen() {
             </div>
           </div>
 
-          <p className="instruction"><b>2.</b> pick a chef name &nbsp;·&nbsp; <b>3.</b> press start on any phone</p>
+          <p className="instruction">
+            <b>2.</b> pick a chef name &nbsp;·&nbsp; <b>3.</b> press{' '}
+            <span className="key">START</span> on any phone
+          </p>
           <div data-el="roster" className="roster" />
+
+          {/* The controls, where everyone is already looking. Static markup:
+              the legend never changes, so it is part of the first paint. */}
+          <ul className="legend" aria-label="Controls">
+            <li>
+              <span className="legend-key legend-key--stick" aria-hidden="true" />
+              move
+            </li>
+            <li>
+              <span className="legend-key legend-key--a" aria-hidden="true">grab</span>
+              pick up · put down
+            </li>
+            <li>
+              <span className="legend-key legend-key--b" aria-hidden="true">chop</span>
+              hold to chop · tap to dash
+            </li>
+          </ul>
         </div>
       </section>
 

@@ -200,6 +200,20 @@ export class ControllerApp {
     this.render();
   }
 
+  /**
+   * Change this chef's name. The chip repaints straight away — a name that
+   * lags behind the thumb that typed it feels broken — and the server's lobby
+   * broadcast is still what decides, so a clamped or refused name corrects
+   * itself one round trip later.
+   */
+  private rename(name: string): void {
+    if (name === this.name) return;
+    this.name = name;
+    saveName(name);
+    this.net.send({ t: 'rename', name });
+    this.render();
+  }
+
   /** Runs a start/again request with a bail-out so the UI never sticks. */
   private sendWithTimeout(
     msg: { t: 'start' } | { t: 'again'; levelId?: string },
@@ -262,6 +276,13 @@ export class ControllerApp {
       case 'lobby': {
         this.players = msg.players;
         this.levelId = msg.levelId;
+        // The roster is the only answer a rename gets, and it is the one that
+        // counts: the server may have clamped the name, or refused it.
+        const me = msg.players.find((p) => p.id === this.playerId);
+        if (me && me.name !== this.name) {
+          this.name = me.name;
+          saveName(me.name);
+        }
         // Cheap and idempotent: an echo of our own choice repaints nothing.
         // The game-over screen cares too — it offers the level after this one.
         if (this.screen === 'lobby' || this.screen === 'gameover') this.render();
@@ -417,6 +438,7 @@ export class ControllerApp {
           levelId: this.levelId,
           onStart: () => this.sendWithTimeout({ t: 'start' }, 'lobby'),
           onSelect: (levelId) => this.selectLevel(levelId),
+          onRename: (name) => this.rename(name),
         };
         if (this.view?.kind === 'lobby') this.view.v.update(props);
         else this.mount({ kind: 'lobby', v: new LobbyScreen(props) });

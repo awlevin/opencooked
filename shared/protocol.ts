@@ -10,7 +10,11 @@
 
 import type { LobbyPlayer, Phase, Snapshot, Vec2 } from './types';
 
-export type Btn = 'a' | 'b'; // a = pick up / put down, b = chop / dash
+// Both buttons are tracked down as well as tapped: A is pick up / put down,
+// and — empty-handed at a board with something raw on it, where nothing else
+// makes sense — the chop, held down. B is chop / spray while held, dash on a
+// tap. Every press acts on `PlayerState.target`, the tile the TV highlights.
+export type Btn = 'a' | 'b';
 
 // --- client -> server ---
 export type C2S =
@@ -36,6 +40,11 @@ export type C2S =
   // Any controller may pick the kitchen, from the lobby only. Unknown ids
   // are ignored. See shared/levels for what an id may be.
   | { t: 'select'; levelId: string }
+  // A seated controller renames its own chef, between rounds only (lobby or
+  // gameover — a name changing mid-service is a distraction on the TV). The
+  // name is re-validated exactly as it is on 'join', and the answer is the
+  // next 'lobby' broadcast, which every screen already reads.
+  | { t: 'rename'; name: string }
   // Any seated controller may stop the round, and any seated controller may
   // start it again — including one who did not pause it. Both are ignored
   // outside `phase === 'playing'`, and the host screen has no seat, so it

@@ -10,7 +10,15 @@ import { test } from 'node:test';
 
 import { DISHES, INGREDIENTS, type DishId, type IngredientType } from '../shared/catalogue';
 import { createLevel } from '../shared/levels';
-import type { FxEvent, Ingredient, Pot, Snapshot, Tile, TileType } from '../shared/types';
+import type {
+  FxEvent,
+  HeldItem,
+  Ingredient,
+  Pot,
+  Snapshot,
+  Tile,
+  TileType,
+} from '../shared/types';
 import {
   BURN_MS,
   CHOP_MS,
@@ -76,8 +84,10 @@ interface Harness {
   snap: Snapshot;
   /** Teleport a chef onto the access tile of `idx` and face the station. */
   face(idx: number, id?: string): void;
-  /** One A press, resolved on the next tick. */
+  /** One A tap — pressed and let go inside a single tick. */
   a(id?: string): void;
+  /** Hold A for `ms`, ticking the whole time, then release. */
+  holdA(ms: number, id?: string): void;
   /** Hold B for `ms`, ticking the whole time, then release. */
   holdB(ms: number, id?: string): void;
   tick(ms: number): void;
@@ -102,7 +112,16 @@ function harness(players = 1, seed = 7, menu?: DishId[]): Harness {
       p.dir = { x: dir.x, y: dir.y };
     },
     a(id = 'p0') {
+      // A is held as well as tapped now (it is the knife at a board), so a
+      // test that means "tap" has to let go before the tick resolves it.
       g.press(id, 'a');
+      g.release(id, 'a');
+      g.tick(TICK_MS);
+    },
+    holdA(ms, id = 'p0') {
+      g.press(id, 'a');
+      h.run(ms);
+      g.release(id, 'a');
       g.tick(TICK_MS);
     },
     holdB(ms, id = 'p0') {
@@ -1473,4 +1492,405 @@ test('a fresh round starts with an empty buffer and a zeroed clock', () => {
   h.g.start();
   assert.equal(h.snap.fx.length, 0);
   assert.equal(h.snap.elapsedMs, 0);
+});
+
+/* -------------------------------- taking aim ---------------------------- */
+
+// Aiming is geometry, so these name tiles by coordinate. Home Kitchen 3 is
+//
+//        0 1 2 3 4 5 6 7 8 9 10 11 12
+//     0  # O T M # # # F # S #  S  #
+//     1  # . . . . . @ . . . .  .  #
+//     2  U . @ . . . . . . . @  .  #
+//     3  R . . . # B # # # . .  .  #
+//     4  C . . . # # # B # . .  .  #
+//     5  # . @ . . . . . . . @  .  #
+//     6  # . . . . . @ . . . .  .  P
+//     7  # X # # # # # # E # #  W  #
+//
+// so (5,3) is the north board with a counter either side of it, and (9,0) a
+// boiling ring with a counter either side of that.
+const at = (x: number, y: number): number => y * LEVEL.w + x;
+const BOARD_N = at(5, 3);
+const WEST_OF_BOARD = at(4, 3);
+const EAST_OF_BOARD = at(6, 3);
+const RING_N = at(9, 0);
+const WEST_OF_RING = at(8, 0);
+
+test('the kitchen those coordinates describe is the one we cook in', () => {
+  assert.equal(LEVEL.tiles[BOARD_N]!.t, 'board');
+  assert.equal(LEVEL.tiles[WEST_OF_BOARD]!.t, 'counter');
+  assert.equal(LEVEL.tiles[EAST_OF_BOARD]!.t, 'counter');
+  assert.equal(LEVEL.tiles[RING_N]!.pot?.kind, 'pot');
+  assert.equal(LEVEL.tiles[WEST_OF_RING]!.t, 'counter');
+  for (const [x, y] of [
+    [5, 2],
+    [4, 2],
+    [9, 1],
+  ] as const) {
+    assert.equal(LEVEL.tiles[at(x, y)]!.t, 'floor', `(${x},${y}) is where a chef stands`);
+  }
+});
+
+/** Stand a chef exactly here, facing exactly there, and let the sim aim once. */
+function aim(h: Harness, x: number, y: number, dx: number, dy: number, id = 'p0'): number | null {
+  const p = h.snap.players.find((q) => q.id === id)!;
+  p.pos = { x, y };
+  const len = Math.hypot(dx, dy);
+  p.dir = { x: dx / len, y: dy / len };
+  h.tick(TICK_MS);
+  return p.target;
+}
+
+test('the aim never lands on a patch of floor', () => {
+  const h = harness();
+  // `round(pos + dir)` used to answer "the floor tile to my right" here, and a
+  // press on floor is a press that silently does nothing — the whole complaint.
+  assert.equal(aim(h, 5, 2, 1, 0), EAST_OF_BOARD);
+  assert.notEqual(h.tile(EAST_OF_BOARD).t, 'floor');
+});
+
+test('leaning at a station from the corner is a press that lands', () => {
+  const h = harness();
+  h.face(CRATES[0]!);
+  h.a();
+  assert.equal(held(h)?.kind, 'ingredient');
+  // Beside the island, mostly facing along it and a little into it.
+  assert.equal(aim(h, 4, 2, 0.9, 0.44), BOARD_N);
+  h.a();
+  assert.equal(held(h), null);
+  assert.equal(h.tile(BOARD_N).item?.kind, 'ingredient');
+});
+
+test('a wobbling thumb does not move the target, a turn does', () => {
+  const h = harness();
+  // Pointed between the board and the counter east of it, board ahead.
+  assert.equal(aim(h, 5, 2, Math.cos(1.187), Math.sin(1.187)), BOARD_N);
+  // Eight degrees the other way: the counter now scores a hair higher, and
+  // the aim stays where the chef put it.
+  assert.equal(aim(h, 5, 2, Math.cos(1.047), Math.sin(1.047)), BOARD_N);
+  // A deliberate turn is not a wobble.
+  assert.equal(aim(h, 5, 2, 1, 1), EAST_OF_BOARD);
+});
+
+test('you get the station you lean at, not the one beside it', () => {
+  const h = harness();
+  assert.equal(aim(h, 9, 1, 0, -1), RING_N);
+  assert.equal(aim(h, 9, 1, -1, -1), WEST_OF_RING);
+  assert.equal(aim(h, 9, 1, 0, -1), RING_N);
+});
+
+test('a chef facing an empty room aims at nothing at all', () => {
+  const h = harness();
+  assert.equal(aim(h, 5, 2, 0, 1), BOARD_N);
+  assert.equal(aim(h, 5, 2, 0, -1), null, 'three floor tiles are not a station');
+  h.a();
+  assert.equal(held(h), null, 'and a press on nothing is a press on nothing');
+});
+
+test('what is in your hands settles two stations at the same angle', () => {
+  const h = harness();
+  h.tile(WEST_OF_BOARD).item = { kind: 'ingredient', ing: rawOnion() };
+  // Empty-handed, the loaded counter wins: it is the one with something on it.
+  assert.equal(aim(h, 4, 2, Math.cos(1.134), Math.sin(1.134)), WEST_OF_BOARD);
+  // Carrying an onion, that counter has nothing left to offer and the empty
+  // board beside it does.
+  h.snap.players[0]!.held = { kind: 'ingredient', ing: rawOnion() };
+  assert.equal(aim(h, 4, 2, Math.cos(1.134), Math.sin(1.134)), BOARD_N);
+});
+
+test('a fire pulls the aim only once you are carrying the answer', () => {
+  const h = harness();
+  igniteTile(h, WEST_OF_BOARD);
+  h.tile(BOARD_N).item = { kind: 'ingredient', ing: rawOnion() };
+  // Bare hands can do nothing about a fire, so the aim offers the board.
+  assert.equal(aim(h, 4, 2, Math.cos(1.134), Math.sin(1.134)), BOARD_N);
+  h.snap.players[0]!.held = { kind: 'extinguisher' };
+  assert.equal(aim(h, 4, 2, Math.cos(1.134), Math.sin(1.134)), WEST_OF_BOARD);
+});
+
+test('standing still, a chef squares up with what they are aiming at', () => {
+  const h = harness();
+  const p = h.snap.players[0]!;
+  assert.equal(aim(h, 5, 2, 0.25, 0.97), BOARD_N);
+  h.run(400);
+  assert.equal(p.target, BOARD_N);
+  assert.ok(p.dir.y > 0.999, `eased onto the board, not ${JSON.stringify(p.dir)}`);
+  // The stick always wins: push it and the facing is the stick's again.
+  h.g.setMove('p0', { x: 1, y: 0 });
+  h.run(200);
+  assert.ok(p.dir.x > 0.999);
+});
+
+test('the snapshot says which tile each press will land on', () => {
+  const h = harness();
+  h.face(BOARDS[0]!);
+  h.tick(TICK_MS);
+  assert.equal(h.snap.players[0]!.target, BOARDS[0]);
+
+  // A resumed host has to highlight the right counter on its first frame.
+  const wire = JSON.parse(JSON.stringify(h.snap)) as Snapshot;
+  const g2 = new Game({ seed: 7, levelId: TEST_LEVEL_ID });
+  g2.restoreSnapshot(wire);
+  assert.equal(g2.snapshot.players[0]!.target, BOARDS[0]);
+
+  // Junk off the wire is not a tile index.
+  const junk = JSON.parse(JSON.stringify(h.snap)) as Snapshot;
+  (junk.players[0] as { target: unknown }).target = 99999;
+  g2.restoreSnapshot(junk);
+  assert.equal(g2.snapshot.players[0]!.target, null);
+});
+
+/* -------------------------- A knows what it is for ----------------------- */
+
+test('A is the knife when your hands are empty at a board', () => {
+  const h = harness();
+  const board = BOARDS[0]!;
+  h.face(CRATES[0]!);
+  h.a();
+  h.face(board);
+  h.a();
+  assert.equal(h.tile(board).item?.kind, 'ingredient');
+
+  h.g.press('p0', 'a');
+  h.run(CHOP_MS * 0.4);
+  assert.equal(h.snap.players[0]!.chopping, true, 'holding A chops');
+  assert.equal(held(h), null, 'and never snatches the raw ingredient back');
+  h.run(CHOP_MS * 0.7);
+  const sliced = h.tile(board).item;
+  assert.ok(sliced?.kind === 'ingredient' && sliced.ing.chopped);
+  h.g.release('p0', 'a');
+  h.tick(TICK_MS);
+
+  // Chopped, the same button is a pickup again.
+  h.a();
+  assert.equal(held(h)?.kind, 'ingredient');
+  assert.equal(h.tile(board).item, null);
+});
+
+test('the knife only comes out for something that wants chopping', () => {
+  const h = harness();
+  const board = BOARDS[0]!;
+  // A bun takes no knife (the catalogue says so), so A picks it straight up.
+  h.face(crateOf('bun'));
+  h.a();
+  h.face(board);
+  h.a();
+  h.holdA(CHOP_MS + TICK_MS * 2);
+  assert.equal(held(h)?.kind, 'ingredient', 'the bun came back to hand at once');
+  assert.equal(h.tile(board).item, null);
+  assert.equal(h.tile(board).chopMs ?? 0, 0, 'and nothing was chopped');
+});
+
+test('with something in hand, A is the table again and B is still the knife', () => {
+  const h = harness();
+  const board = BOARDS[0]!;
+  h.tile(board).item = { kind: 'ingredient', ing: rawOnion() };
+  h.face(crateOf('tomato'));
+  h.a();
+  h.face(board);
+  h.holdA(CHOP_MS + TICK_MS * 2);
+  assert.equal(held(h)?.kind, 'ingredient', 'a full hand still holds its tomato');
+  const raw = h.tile(board).item;
+  assert.ok(raw?.kind === 'ingredient' && !raw.ing.chopped, 'and A did not chop for it');
+
+  h.holdB(CHOP_MS + TICK_MS * 2);
+  const sliced = h.tile(board).item;
+  assert.ok(sliced?.kind === 'ingredient' && sliced.ing.chopped, 'B chops with a full hand');
+});
+
+test('one chef leaning on both buttons is not two chefs', () => {
+  const h = harness();
+  const board = BOARDS[0]!;
+  h.tile(board).item = { kind: 'ingredient', ing: rawOnion() };
+  h.face(board);
+  h.g.press('p0', 'a');
+  h.g.press('p0', 'b');
+  h.run(CHOP_MS * 0.6);
+  const item = h.tile(board).item;
+  assert.ok(item?.kind === 'ingredient' && !item.ing.chopped);
+});
+
+/* ------------------- the aim's mirror of the action table ---------------- */
+
+/**
+ * `Game.affords` is private on purpose: it is an internal mirror of the
+ * Button A table that the aim uses to break near-ties. Reaching in is exactly
+ * what the test below is for — it is what keeps the mirror honest.
+ */
+const affordsAt = (h: Harness, idx: number): boolean =>
+  (h.g as unknown as { affords(t: Tile, item: HeldItem | null): boolean }).affords(
+    h.tile(idx),
+    held(h),
+  );
+
+/** Everything one press could change about a tile, as a comparable string. */
+const outcome = (h: Harness, idx: number): string =>
+  JSON.stringify({
+    tile: h.tile(idx),
+    held: held(h),
+    score: h.snap.score,
+    served: h.snap.served,
+    orders: h.snap.orders.length,
+  });
+
+const vessel = (state: Pot['state'], contents: Ingredient[] = []): Pot => ({
+  kind: 'pot',
+  contents,
+  cookMs: 0,
+  state,
+});
+
+const soup = (): Ingredient[] => [done('onion'), done('onion'), done('onion')];
+
+interface Station {
+  name: string;
+  idx: number;
+  /** A tile that is alight: A refuses every one of those, foam does not. */
+  burning?: boolean;
+  set?: (h: Harness) => void;
+}
+
+const STATIONS: Station[] = [
+  { name: 'a crate', idx: crateOf('onion') },
+  { name: 'the plate stack', idx: PLATES[0]! },
+  { name: 'the serve window', idx: SERVE[0]! },
+  { name: 'the bin', idx: TRASH[0]! },
+  { name: 'a stocked bracket', idx: MOUNT },
+  { name: 'an empty bracket', idx: MOUNT, set: (h) => void (h.tile(MOUNT).item = null) },
+  { name: 'an empty counter', idx: COUNTERS[0]! },
+  {
+    name: 'a counter holding a raw onion',
+    idx: COUNTERS[0]!,
+    set: (h) => void (h.tile(COUNTERS[0]!).item = { kind: 'ingredient', ing: rawOnion() }),
+  },
+  {
+    name: 'a counter holding a ready onion',
+    idx: COUNTERS[0]!,
+    set: (h) => void (h.tile(COUNTERS[0]!).item = { kind: 'ingredient', ing: done('onion') }),
+  },
+  {
+    name: 'a counter holding a clean plate',
+    idx: COUNTERS[0]!,
+    set: (h) => void (h.tile(COUNTERS[0]!).item = { kind: 'plate', contents: [] }),
+  },
+  {
+    name: 'a counter holding a part-built plate',
+    idx: COUNTERS[0]!,
+    set: (h) => void (h.tile(COUNTERS[0]!).item = { kind: 'plate', contents: [done('onion')] }),
+  },
+  {
+    name: 'a counter holding an idle pot',
+    idx: COUNTERS[0]!,
+    set: (h) => void (h.tile(COUNTERS[0]!).item = { kind: 'pot', pot: vessel('idle') }),
+  },
+  {
+    name: 'a counter holding a finished pot',
+    idx: COUNTERS[0]!,
+    set: (h) => void (h.tile(COUNTERS[0]!).item = { kind: 'pot', pot: vessel('done', soup()) }),
+  },
+  {
+    name: 'a counter holding a burnt pot',
+    idx: COUNTERS[0]!,
+    set: (h) => void (h.tile(COUNTERS[0]!).item = { kind: 'pot', pot: vessel('burnt', soup()) }),
+  },
+  { name: 'an empty board', idx: BOARDS[0]! },
+  {
+    name: 'a board holding a raw onion',
+    idx: BOARDS[0]!,
+    set: (h) => void (h.tile(BOARDS[0]!).item = { kind: 'ingredient', ing: rawOnion() }),
+  },
+  {
+    name: 'a board holding a chopped onion',
+    idx: BOARDS[0]!,
+    set: (h) => void (h.tile(BOARDS[0]!).item = { kind: 'ingredient', ing: chopped('onion') }),
+  },
+  {
+    name: 'a board holding a bun',
+    idx: BOARDS[0]!,
+    set: (h) =>
+      void (h.tile(BOARDS[0]!).item = {
+        kind: 'ingredient',
+        ing: { type: 'bun', chopped: false, cooked: false },
+      }),
+  },
+  { name: 'a ring with an idle pot', idx: STOVES[0]! },
+  { name: 'a ring with a cooking pot', idx: STOVES[0]!, set: (h) => fillPot(h, STOVES[0]!) },
+  { name: 'a ring with a finished pot', idx: STOVES[0]!, set: (h) => finish(h.tile(STOVES[0]!).pot!) },
+  {
+    name: 'a ring with a burnt pot',
+    idx: STOVES[0]!,
+    set: (h) => {
+      const p = h.tile(STOVES[0]!).pot!;
+      p.contents = soup();
+      p.state = 'burnt';
+    },
+  },
+  { name: 'a bare ring', idx: STOVES[0]!, set: (h) => void (h.tile(STOVES[0]!).pot = null) },
+  { name: 'a frying ring', idx: PANS[0]! },
+  {
+    name: 'a burning counter',
+    idx: COUNTERS[0]!,
+    burning: true,
+    set: (h) => igniteTile(h, COUNTERS[0]!),
+  },
+];
+
+const HANDS: { name: string; take: () => HeldItem | null }[] = [
+  { name: 'empty-handed', take: () => null },
+  { name: 'a raw onion', take: () => ({ kind: 'ingredient', ing: rawOnion() }) },
+  { name: 'a chopped onion', take: () => ({ kind: 'ingredient', ing: chopped('onion') }) },
+  { name: 'a ready onion', take: () => ({ kind: 'ingredient', ing: done('onion') }) },
+  { name: 'a chopped patty', take: () => ({ kind: 'ingredient', ing: chopped('meat') }) },
+  { name: 'a clean plate', take: () => ({ kind: 'plate', contents: [] }) },
+  { name: 'a plate of soup', take: () => ({ kind: 'plate', contents: soup() }) },
+  { name: 'an empty pot', take: () => ({ kind: 'pot', pot: vessel('idle') }) },
+  { name: 'a finished pot', take: () => ({ kind: 'pot', pot: vessel('done', soup()) }) },
+  { name: 'the extinguisher', take: () => ({ kind: 'extinguisher' }) },
+];
+
+test('the aim only ever promises what a press can deliver', () => {
+  for (const station of STATIONS) {
+    for (const hand of HANDS) {
+      const build = (): Harness => {
+        const h = harness(1, 7, ['onion-soup']);
+        station.set?.(h);
+        h.snap.players[0]!.held = hand.take();
+        h.face(station.idx);
+        return h;
+      };
+      const where = `${hand.name} at ${station.name}`;
+
+      // The same kitchen twice, one press apart. Whatever differs is the
+      // press, so nothing that merely ticked can be mistaken for one.
+      const idle = build();
+      idle.tick(TICK_MS);
+      const acting = build();
+      const promised = affordsAt(acting, station.idx);
+      acting.g.press('p0', 'a');
+      acting.tick(TICK_MS);
+      acting.g.release('p0', 'a');
+
+      assert.equal(acting.snap.players[0]!.target, station.idx, `aimed elsewhere: ${where}`);
+      if (station.burning) {
+        // Flames refuse every press; the mirror's one non-A row is the foam.
+        assert.equal(outcome(acting, station.idx), outcome(idle, station.idx), where);
+        assert.equal(promised, hand.name === 'the extinguisher', where);
+        continue;
+      }
+      assert.equal(outcome(acting, station.idx) !== outcome(idle, station.idx), promised, where);
+    }
+  }
+});
+
+test('renamePlayer changes the label and nothing else', () => {
+  const h = harness(2);
+  const before = structuredClone(h.g.snapshot.players);
+  h.g.renamePlayer('p1', 'Abri');
+  h.g.renamePlayer('nobody', 'Ghost'); // an unknown id is a no-op
+  const after = h.g.snapshot.players;
+  assert.equal(after.length, 2);
+  assert.equal(after[1]!.name, 'Abri');
+  assert.deepEqual({ ...after[1]!, name: before[1]!.name }, before[1]);
+  assert.deepEqual(after[0], before[0]);
 });

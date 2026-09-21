@@ -64,23 +64,57 @@ export const clearToken = (room: string): void => {
 /** Longest pattern we will play, so a bad packet cannot buzz for a minute. */
 const MAX_BUZZ_STEPS = 9;
 
+/** A button press, or the lighter touch of finding the stick. */
+export type TickWeight = 'press' | 'touch';
+
+/**
+ * How long each kind of local tap is felt for. Both are far shorter than the
+ * shortest thing the server sends (25 ms), so a press reads as a click under
+ * the thumb and never as "something happened in the kitchen".
+ */
+const TICK_MS: Record<TickWeight, number> = { press: 12, touch: 7 };
+
+/** When whatever the server last asked for is due to stop playing. */
+let buzzingUntil = 0;
+
+function vibrate(pattern: number | number[]): boolean {
+  const nav = navigator as Navigator & { vibrate?: (p: number | number[]) => boolean };
+  if (typeof nav.vibrate !== 'function') return false; // iOS Safari: no haptics
+  try {
+    nav.vibrate(pattern);
+  } catch {
+    /* unsupported or blocked */
+  }
+  return true;
+}
+
 /**
  * Vibrate. A number is one pulse; an array is a pattern — buzz, pause, buzz,
  * … — which is how a great serve is felt as two pulses and a perfect one as
  * three. Every step is clamped, because this comes off the wire.
  */
 export function buzz(ms: number | number[]): void {
-  const nav = navigator as Navigator & { vibrate?: (p: number | number[]) => boolean };
-  if (typeof nav.vibrate !== 'function') return;
   const step = (v: unknown): number =>
     Math.max(1, Math.min(1000, Math.round(typeof v === 'number' && Number.isFinite(v) ? v : 0)));
   const pattern = Array.isArray(ms) ? ms.slice(0, MAX_BUZZ_STEPS).map(step) : step(ms);
   if (Array.isArray(pattern) && pattern.length === 0) return;
-  try {
-    nav.vibrate(pattern);
-  } catch {
-    /* unsupported or blocked */
-  }
+  if (!vibrate(pattern)) return;
+  const total = Array.isArray(pattern) ? pattern.reduce((a, b) => a + b, 0) : pattern;
+  buzzingUntil = performance.now() + total;
+}
+
+/**
+ * The click under a control, fired on pointerdown and never off the wire: the
+ * phone answers the thumb before the server has even heard about the press.
+ *
+ * `navigator.vibrate` replaces whatever is already playing, so a tick that
+ * lands during a pattern would cut it short — and trading the three pulses of
+ * a perfect serve for "you pressed a button" is a bad trade. While the server's
+ * buzz is still running the phone is already talking, so the tick stands down.
+ */
+export function tick(weight: TickWeight = 'press'): void {
+  if (performance.now() < buzzingUntil) return;
+  vibrate(TICK_MS[weight]);
 }
 
 /* ------------------------------ wake lock ------------------------------- */
@@ -148,6 +182,45 @@ export function releaseWakeLock(): void {
   const s = sentinel;
   sentinel = null;
   if (s && !s.released) void s.release().catch(() => {});
+}
+
+/* ----------------------------- orientation ------------------------------ */
+
+interface OrientationLike {
+  lock?: (o: string) => Promise<void>;
+  unlock?: () => void;
+}
+
+function orientationApi(): OrientationLike | null {
+  const s = screen as Screen & { orientation?: OrientationLike };
+  return s.orientation ?? null;
+}
+
+/**
+ * Ask the OS to hold the phone in landscape. Browsers only grant this to a
+ * fullscreen page, and iOS Safari not at all, so it is a gift from the phones
+ * that allow it rather than the answer to one held upright — that is what the
+ * rotate hint is for. Every refusal is expected, and silent.
+ */
+export function lockLandscape(): void {
+  const api = orientationApi();
+  if (typeof api?.lock !== 'function') return;
+  try {
+    void api.lock('landscape').catch(() => {});
+  } catch {
+    /* not allowed outside fullscreen */
+  }
+}
+
+/** Hands the orientation back to the OS. Idempotent, and safe if never locked. */
+export function unlockOrientation(): void {
+  const api = orientationApi();
+  if (typeof api?.unlock !== 'function') return;
+  try {
+    api.unlock();
+  } catch {
+    /* nothing was locked */
+  }
 }
 
 /* ------------------------------- gestures ------------------------------- */

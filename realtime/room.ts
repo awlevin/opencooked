@@ -710,6 +710,9 @@ export class Room {
       case 'select':
         this.select(link, msg.levelId);
         return;
+      case 'rename':
+        this.rename(link, msg.name);
+        return;
       case 'pause':
       case 'resume':
         this.setPaused(link, msg.t === 'pause');
@@ -896,6 +899,31 @@ export class Room {
   }
 
   /**
+   * Change a chef's name, from that chef's own phone.
+   *
+   * Between rounds only. Mid-service the name is on the TV in the player
+   * label, in the pause card and on every phone's HUD, and a chef quietly
+   * becoming somebody else there is a distraction rather than a feature.
+   *
+   * Everything that carries a name is written from the one seat record: the
+   * roster broadcast, the registry entry a reconnect reclaims the seat from,
+   * and the sim's copy of the label. An empty or junk name keeps the old one,
+   * so the worst a phone can do is repaint what is already on screen.
+   */
+  private rename(link: Link, raw: unknown): void {
+    const pid = this.byConn.get(link.id);
+    const st = pid ? this.seats.get(pid) : undefined;
+    if (!st || this.game.phase === 'playing') return;
+    const name = cleanName(raw, st.seat.name);
+    if (name === st.seat.name) return; // an echo, or a rejected name
+    st.seat.name = name;
+    this.game.renamePlayer(st.seat.playerId, name);
+    this.sendLobby();
+    void this.persist();
+    console.log(`[room ${this.code}] ${st.seat.playerId} is now ${name}`);
+  }
+
+  /**
    * Stop or start the round from a phone. Only a seated chef may: the host
    * screen has no seat, and a stranger's socket must not be able to freeze a
    * kitchen it is not cooking in.
@@ -958,6 +986,8 @@ export class Room {
     // Mid-round the body stays on the floor until the grace period is up, so
     // a phone that slept for ten seconds does not cost the team a chef.
     this.game.setMove(playerId, { x: 0, y: 0 });
+    // Both buttons: either one held down is a chef who would chop forever.
+    this.game.release(playerId, 'a');
     this.game.release(playerId, 'b');
     console.log(
       `[room ${this.code}] ${st.seat.name} disconnected — seat held for ` +

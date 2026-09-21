@@ -22,9 +22,20 @@
   --accent-faint: rgba(241, 196, 15, 0.16);
   --accent-hairline: rgba(241, 196, 15, 0.32);
 
-  --btn: clamp(96px, min(28vw, 30vh), 168px);
+  /* The action discs. GRAB is the verb of the whole game, so it is the bigger
+     of the two and sits lowest, where the thumb already rests; CHOP steps up
+     and in along the same arc. Both are measured off the short edge of the
+     screen — the one a landscape phone has least of — so a 375 pt phone and a
+     tablet each get a disc the thumb can find without looking. */
+  --btn-a: clamp(124px, 40vmin, 200px);
+  --btn-b: calc(var(--btn-a) * 0.84);
+  /* Dead space around each disc that still counts as a press. */
+  --btn-halo: clamp(9px, 2.4vmin, 18px);
+
   --pad-x: max(14px, env(safe-area-inset-left));
   --pad-r: max(14px, env(safe-area-inset-right));
+  --pad-t: max(12px, env(safe-area-inset-top));
+  --pad-b: max(16px, env(safe-area-inset-bottom));
 
   color-scheme: dark;
 }
@@ -69,9 +80,7 @@ body {
 .stage {
   position: absolute;
   inset: 0;
-  padding:
-    max(12px, env(safe-area-inset-top)) var(--pad-r)
-    max(16px, env(safe-area-inset-bottom)) var(--pad-x);
+  padding: var(--pad-t) var(--pad-r) var(--pad-b) var(--pad-x);
 }
 
 .screen {
@@ -423,7 +432,7 @@ body {
 
 .level-preview__map {
   position: relative;
-  height: clamp(84px, 16vh, 156px);
+  height: clamp(78px, 12vh, 124px);
   border-radius: 14px;
   overflow: hidden;
   background: #0a0d15;
@@ -496,7 +505,7 @@ body {
 
 .screen--lobby {
   justify-content: space-between;
-  gap: 14px;
+  gap: 10px;
   padding-top: 10px;
 }
 
@@ -504,7 +513,7 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
 }
 
 .chef-chip {
@@ -531,9 +540,11 @@ body {
   letter-spacing: 0.02em;
 }
 
+/* The list gives up its room to whatever is opened above it, but never all of
+   it: a lobby that cannot show one chef has stopped being a lobby. */
 .roster-wrap {
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: 74px;
   display: flex;
   flex-direction: column;
   justify-content: safe center;
@@ -771,9 +782,11 @@ body {
   opacity: 0;
 }
 
+/* Drawn the size the stick actually appears at, and never bigger: a ring that
+   promises more travel than the thumb has is a lie the first drag exposes. */
 .stick-hint__ring {
-  width: 132px;
-  height: 132px;
+  width: clamp(112px, 34vmin, 176px);
+  height: clamp(112px, 34vmin, 176px);
   border-radius: 50%;
   border: 2px dashed rgba(255, 255, 255, 0.14);
 }
@@ -847,17 +860,13 @@ body {
   touch-action: none;
 }
 
-/* Diagonal cluster: CHOP sits up-and-left of GRAB, on the thumb's natural arc. */
-.pad-btn--b {
-  margin-right: calc(var(--btn) * 0.38);
-}
-
 .pad-btn {
+  position: relative;
   appearance: none;
   -webkit-appearance: none;
   border: none;
-  width: var(--btn);
-  height: var(--btn);
+  width: var(--btn-a);
+  height: var(--btn-a);
   border-radius: 50%;
   font: inherit;
   color: #0d1017;
@@ -865,7 +874,7 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1px;
+  gap: 2px;
   touch-action: none;
   transition:
     transform 70ms ease,
@@ -873,18 +882,51 @@ body {
     filter 70ms ease;
 }
 
+/* CHOP is the smaller disc and sits up-and-left of GRAB, on the arc the thumb
+   swings through anyway. It has to come after the base rule: both selectors
+   weigh the same, so source order is what decides the size. */
+.pad-btn--b {
+  width: var(--btn-b);
+  height: var(--btn-b);
+  margin-right: calc(var(--btn-a) * 0.38);
+}
+
+/* The hit area is wider than the disc: a thumb aiming at a button it cannot
+   look at lands wide of it, and a near miss that does nothing is the most
+   expensive kind of miss in a 180-second round. The two halos meet in the gap
+   between the buttons, and GRAB is painted last, so the seam belongs to GRAB
+   — the press a player is far more likely to have meant. */
+.pad-btn::before {
+  content: '';
+  position: absolute;
+  inset: calc(var(--btn-halo) * -1);
+  border-radius: 50%;
+}
+
+/* Labels are a fraction of their own disc, so the whole button scales as one
+   object from a small phone to a tablet. */
 .pad-btn__label {
-  font-size: clamp(17px, 4.6vmin, 26px);
+  font-size: calc(var(--btn-a) * 0.2);
   letter-spacing: 0.06em;
   line-height: 1;
 }
 
+.pad-btn--b .pad-btn__label {
+  font-size: calc(var(--btn-b) * 0.2);
+}
+
+/* One word, because a disc is a terrible place for a sentence: the pad says
+   how the button is played, and the quick-start screen says what it does. */
 .pad-btn__sub {
-  font-size: clamp(9px, 2.2vmin, 12px);
-  letter-spacing: 0.2em;
-  margin-right: -0.2em;
+  font-size: calc(var(--btn-a) * 0.085);
+  letter-spacing: 0.24em;
+  margin-right: -0.24em;
   opacity: 0.55;
   line-height: 1;
+}
+
+.pad-btn--b .pad-btn__sub {
+  font-size: calc(var(--btn-b) * 0.095);
 }
 
 .pad-btn--a {
@@ -913,6 +955,38 @@ body {
 .pad-btn:active {
   transform: translateY(8px) scale(0.96);
   filter: brightness(1.2) saturate(1.15);
+}
+
+/* A ring snapping out of the disc on every press. iOS Safari has no vibration
+   API at all, so on half the phones at a table this ring *is* the answer to a
+   press — it has to be unmissable in peripheral vision. */
+.pad-btn::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 3px solid var(--accent-bright);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pad-btn--b::after {
+  border-color: rgba(255, 255, 255, 0.55);
+}
+
+.pad-btn.is-pressed::after {
+  animation: btn-ring 340ms ease-out;
+}
+
+@keyframes btn-ring {
+  from {
+    opacity: 0.7;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.22);
+  }
 }
 
 .pad-btn.is-pressed .pad-btn__label,
@@ -1033,8 +1107,9 @@ body {
   margin-top: -8px;
 }
 
-/* Short viewports (landscape phones): compact the form so nothing scrolls. */
-@media (max-height: 540px) {
+/* Short viewports — a phone on its side, or a small one stood up: compact
+   the form and the lobby so nothing scrolls. */
+@media (max-height: 600px) {
   .card {
     gap: 10px;
     padding: 14px 16px 16px;
@@ -1211,9 +1286,20 @@ body {
   }
 }
 
-/* Portrait: the phone is held low, so drop both control clusters into thumb
-   reach instead of leaving them stranded mid-screen. */
+/* Portrait: the pad is playable but cramped — half the width for two thumbs
+   that now sit on top of each other — so the hint above asks for a rotation
+   and this keeps the pad honest for the player who cannot give one. The phone
+   is held low, so both clusters drop into thumb reach, and the discs come in
+   a size to leave the diagonal cluster inside its half. */
 @media (orientation: portrait) {
+  :root {
+    --btn-a: clamp(104px, 33vmin, 150px);
+  }
+
+  .pad-btn--b {
+    margin-right: calc(var(--btn-a) * 0.3);
+  }
+
   .stick-zone,
   .btn-zone {
     justify-content: flex-end;
@@ -1221,7 +1307,7 @@ body {
   }
 
   .stick-hint {
-    margin-bottom: calc(var(--btn) * 0.35);
+    margin-bottom: calc(var(--btn-a) * 0.35);
   }
 }
 
@@ -1232,23 +1318,15 @@ body {
     padding: 3px 12px 3px 6px;
   }
 
-  .stick-hint__ring {
-    width: 108px;
-    height: 108px;
-  }
-
   /* The buttons are centred here rather than dropped to the bottom, so shrink
-     pause, tuck it into the corner, and push the cluster down off it. */
+     pause and tuck it into the corner: the cluster now fills nearly the whole
+     height and has none to spare for a button nobody presses on purpose. */
   .pad-pause {
     top: 0;
     right: 0;
     width: 48px;
     height: 48px;
     font-size: 15px;
-  }
-
-  .btn-zone {
-    padding-top: 44px;
   }
 }
 
@@ -1282,82 +1360,9 @@ body {
 
 .tutorial-intro { max-width: 28em; }
 
-.tutorial-controls {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  align-content: center;
-  gap: 8px;
-}
-
-.tutorial-control {
-  min-width: 0;
-  display: grid;
-  justify-items: center;
-  align-content: center;
-  gap: 10px;
-  padding: 14px 6px;
-  border: 1px solid var(--edge);
-  border-radius: 18px;
-  background: linear-gradient(180deg, var(--panel-hi), var(--panel));
-  text-align: center;
-}
-
-.tutorial-stick,
-.tutorial-button {
-  width: clamp(58px, 18vw, 84px);
-  height: clamp(58px, 18vw, 84px);
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  font-size: clamp(14px, 4vw, 19px);
-  color: #0d1017;
-  background: linear-gradient(180deg, var(--accent-bright), var(--accent));
-  box-shadow: 0 6px 0 var(--accent-deep), 0 10px 22px var(--accent-glow);
-}
-
-.tutorial-stick {
-  color: var(--ink);
-  font-size: 30px;
-  background: linear-gradient(180deg, #39435c, #232b3d);
-  box-shadow: 0 6px 0 #141a27, 0 10px 22px rgba(0,0,0,.45);
-}
-
-.tutorial-button--chop {
-  color: var(--ink);
-  background: linear-gradient(180deg, #39435c, #232b3d);
-  box-shadow: 0 6px 0 #141a27, 0 10px 22px rgba(0,0,0,.45);
-}
-
-.tutorial-control__copy {
-  max-width: 9em;
-  color: var(--muted);
-  font-size: 9px;
-  line-height: 1.25;
-  letter-spacing: .11em;
-}
-
-.tutorial-recipe {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 10px 8px;
-  border: 1px solid var(--accent-hairline);
-  border-radius: 15px;
-  background: var(--accent-faint);
-  color: var(--ink);
-  font-size: clamp(10px, 3vw, 13px);
-}
-
-.tutorial-recipe span { white-space: nowrap; }
-.tutorial-recipe i { color: var(--accent-bright); font-style: normal; }
-
 @media (max-height: 620px) {
   .screen--tutorial { gap: 8px; }
-  .tutorial-intro, .tutorial-recipe { display: none; }
-  .tutorial-control { padding: 8px 4px; }
+  .tutorial-intro { display: none; }
 }
 
 .join-promise {
@@ -1388,7 +1393,620 @@ body {
   touch-action: manipulation;
 }
 
+/* ------------------------------ how to play ------------------------------ */
+
+/* The pad, drawn small. Shared by the quick-start screen (`--big`) and the
+   lobby's fold-away, so the picture a chef is shown while waiting is the same
+   one they were shown on the way in — same colours, same words, same order as
+   the real controls. `--key` is the diameter of one control. */
+.guide {
+  --key: clamp(40px, 11.5vw, 54px);
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.guide--big {
+  --key: clamp(58px, 18vw, 84px);
+  flex: 1 1 auto;
+  min-height: 0;
+  align-content: center;
+  gap: 10px;
+}
+
+.guide__cell {
+  min-width: 0;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 7px;
+  padding: 8px 5px;
+  border: 1px solid var(--edge);
+  border-radius: 16px;
+  background: linear-gradient(180deg, var(--panel-hi), var(--panel));
+  text-align: center;
+}
+
+.guide--big .guide__cell {
+  gap: 10px;
+  padding: 14px 6px;
+  border-radius: 18px;
+}
+
+.guide__copy {
+  max-width: 10em;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.25;
+  letter-spacing: 0.11em;
+}
+
+.guide-stick,
+.guide-btn {
+  width: var(--key);
+  height: var(--key);
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: clamp(11px, 3.4vw, 15px);
+  letter-spacing: 0.06em;
+}
+
+.guide--big .guide-btn {
+  font-size: clamp(14px, 4vw, 19px);
+}
+
+/* The two buttons, lifted straight off the pad: the yellow one is the one
+   that is yellow in the player's hand. */
+.guide-btn--a {
+  color: #0d1017;
+  background: linear-gradient(180deg, var(--accent-bright), var(--accent));
+  box-shadow:
+    0 5px 0 var(--accent-deep),
+    0 9px 18px var(--accent-glow);
+}
+
+.guide-btn--b {
+  color: var(--ink);
+  background: linear-gradient(180deg, #39435c, #232b3d);
+  box-shadow:
+    0 5px 0 #141a27,
+    0 9px 18px rgba(0, 0, 0, 0.45);
+}
+
+/* A joystick with the thumb pushed off-centre: the drag, standing still. */
+.guide-stick {
+  position: relative;
+  background: radial-gradient(circle at 50% 42%, #2b3348, #171d2b);
+  box-shadow:
+    inset 0 0 0 2px rgba(255, 255, 255, 0.07),
+    0 5px 0 #141a27,
+    0 9px 18px rgba(0, 0, 0, 0.45);
+}
+
+.guide-stick__thumb {
+  position: absolute;
+  left: 60%;
+  top: 30%;
+  width: 44%;
+  height: 44%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: linear-gradient(180deg, #f6f8ff, #c3cadd);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+}
+
+/* The round, in five words: what every ticket is, start to finish. */
+.flow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 8px;
+  border: 1px solid var(--accent-hairline);
+  border-radius: 15px;
+  background: var(--accent-faint);
+  color: var(--ink);
+  font-size: clamp(10px, 3vw, 13px);
+}
+
+.flow__step {
+  white-space: nowrap;
+}
+
+.flow__arrow {
+  color: var(--accent-bright);
+  font-style: normal;
+}
+
+/* The lobby's fold-away. Closed it is one tappable row; open it is the same
+   picture the quick-start screen showed, and the roster above it gives up the
+   room rather than the chooser or the start button below. */
+.how {
+  flex: none;
+  border: 1px solid var(--edge);
+  border-radius: 18px;
+  background: rgba(19, 24, 36, 0.55);
+}
+
+.how__summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 14px;
+  list-style: none;
+  color: var(--accent-bright);
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  margin-right: -0.2em;
+  text-transform: uppercase;
+  touch-action: manipulation;
+}
+
+.how__summary::-webkit-details-marker {
+  display: none;
+}
+
+.how__chevron {
+  font-size: 11px;
+  line-height: 1;
+  transition: transform 200ms ease;
+}
+
+.how[open] .how__chevron {
+  transform: rotate(180deg);
+}
+
+.how__body {
+  display: grid;
+  gap: 7px;
+  padding: 0 8px 8px;
+}
+
+/* -------------------------- renaming, in the chip ------------------------ */
+
+/* The chip is a button now. It keeps the pill it always was; the pen is the
+   only thing that says it can be pressed. */
+.chef-chip--edit {
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  color: var(--ink);
+  padding-right: 14px;
+  min-height: 44px;
+  touch-action: manipulation;
+  transition: transform 90ms ease;
+}
+
+.chef-chip--edit:active {
+  transform: translateY(2px);
+}
+
+.chef-chip__pen {
+  font-size: 14px;
+  line-height: 1;
+  color: var(--accent-bright);
+  opacity: 0.9;
+}
+
+/* `hidden` has to win against the chip's own display; the editor takes the
+   chip's place in the head, so exactly one of the two is ever laid out. */
+.chef-chip[hidden],
+.rename[hidden] {
+  display: none;
+}
+
+.rename {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(320px, 100%);
+}
+
+.input--name {
+  text-align: center;
+  font-size: 19px;
+  padding: 11px 14px;
+  border-radius: 14px;
+}
+
+.rename__ok {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 54px;
+  min-height: 48px;
+  border: none;
+  border-radius: 14px;
+  font: inherit;
+  font-size: 22px;
+  line-height: 1;
+  color: #10131c;
+  background: linear-gradient(180deg, var(--accent-bright), var(--accent));
+  box-shadow: 0 4px 0 var(--accent-deep);
+  touch-action: manipulation;
+}
+
+.rename__ok:active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 var(--accent-deep);
+}
+
+/* ------------------------------ starting up ------------------------------ */
+
+/* Nobody could tell what began the round, so the button says what it does and
+   a ring breathes around it until somebody presses it. The ring is a separate
+   layer on purpose: the button's own shadow is its press feedback and must
+   stay free to answer a thumb. */
+.big-btn--go {
+  position: relative;
+}
+
+.big-btn--go::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: inherit;
+  border: 2px solid var(--accent-bright);
+  opacity: 0;
+  pointer-events: none;
+  animation: cta-ring 3s ease-out infinite;
+}
+
+.big-btn--go:disabled::after {
+  animation: none;
+}
+
+@keyframes cta-ring {
+  0% {
+    opacity: 0.45;
+    transform: scale(0.99);
+  }
+  55%,
+  100% {
+    opacity: 0;
+    transform: scale(1.05);
+  }
+}
+
+.start-note {
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+/* Below this the how-to opens as a sheet floating over the roster instead of
+   in the column, because there is no height to give it. `screens.ts` pairs
+   with this number: above it the panel sits in the column and starts open.
+   Opening it must never move the chooser or the start button. */
+@media (max-height: 880px) {
+  .how {
+    position: relative;
+  }
+
+  .how[open] {
+    z-index: 2;
+  }
+
+  .how__body {
+    position: absolute;
+    left: 6px;
+    right: 6px;
+    bottom: calc(100% + 6px);
+    padding: 10px;
+    border-radius: 16px;
+    background: var(--panel);
+    border: 1px solid var(--edge);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.6);
+  }
+
+  /* Laid on their sides in the sheet: three short rows read as fast as three
+     tall cards and take a third of the height. */
+  .how__body .guide__cell {
+    grid-auto-flow: column;
+    grid-template-columns: auto minmax(0, 1fr);
+    justify-items: start;
+    align-items: center;
+    text-align: left;
+    gap: 8px;
+    padding: 6px 8px;
+  }
+
+  .how__body .guide__copy {
+    max-width: none;
+  }
+}
+
+/* A narrow phone held upright: three columns turn the copy into confetti, and
+   the sheet floats, so it can afford to be three rows instead. */
+@media (max-height: 880px) and (max-width: 430px) {
+  .how__body .guide {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* The lobby carries one row more than it used to. On anything shorter than a
+   big phone the eyebrow goes — the chip under it says the same thing — and the
+   kitchen's picture gives up a few pixels, so the start button never does. */
+@media (max-height: 700px) {
+  .lobby-status {
+    display: none;
+  }
+
+  .how__summary {
+    min-height: 40px;
+    padding: 8px 12px;
+  }
+
+  .guide__cell {
+    border-radius: 13px;
+  }
+
+  .start-note {
+    font-size: 11px;
+  }
+}
+
+/* A middle-sized phone: still room for the kitchen's picture, but not for it
+   at full size. Banded rather than open-ended, because below 600 the block
+   further down drops the picture altogether and this must not undo that. */
+@media (max-height: 700px) and (min-height: 601px) {
+  .screen--lobby .big-btn--hero {
+    min-height: 72px;
+  }
+
+  .screen--lobby .level-preview__map {
+    height: clamp(64px, 10vh, 110px);
+  }
+}
+
+@media (max-height: 600px) {
+  /* The editor must be no taller than the chip it replaces, or opening it
+     pushes the start button off a screen this short. */
+  .input--name {
+    font-size: 17px;
+    padding: 9px 12px;
+  }
+
+  .rename__ok {
+    min-height: 44px;
+  }
+}
+
+/* A phone on its side has width to spare and no height at all. Cap the
+   column and centre it: a start button 660px wide is not twice as pressable,
+   and stretched copy is harder to read, not easier. */
+@media (orientation: landscape) and (max-height: 540px) {
+  .screen--lobby > * {
+    width: min(520px, 100%);
+    align-self: center;
+  }
+}
+
+@media (max-height: 400px) {
+  /* Two rows of explanation is one too many when the pad is this small. */
+  .how__body .flow {
+    display: none;
+  }
+
+  /* The chip carries the greeting and the room is already behind us; both
+     lines go, and the room gets its chefs back. */
+  .screen--lobby .title,
+  .lobby-head .msg,
+  .roster__count {
+    display: none;
+  }
+
+  .roster-wrap {
+    min-height: 46px;
+    padding: 0;
+  }
+}
+
 :focus-visible {
   outline: 3px solid var(--accent-bright);
   outline-offset: 3px;
+}
+
+/* ---------------------------- turn your phone ---------------------------- */
+
+/* Both hints are present only in portrait, and that is a media query rather
+   than a listener: turning the phone answers them on the same frame, with no
+   resize maths to fall out of step with the screen. */
+.rotate {
+  display: none;
+}
+
+/* A hint the player has waived. Two classes, so it outweighs the media rules
+   below and stays gone however the phone is turned afterwards. */
+.rotate[hidden] {
+  display: none;
+}
+
+@media (orientation: portrait) {
+  .rotate--note {
+    display: inline-flex;
+  }
+}
+
+/* The overlay is for a phone held upright, where the two thumbs end up in the
+   same corner. A tablet in portrait is still a wide, comfortable pad, and
+   telling someone to turn a tablet they are holding fine is just rude — the
+   lobby's note above is nudge enough. */
+@media (orientation: portrait) and (max-width: 600px) {
+  .rotate--overlay {
+    display: flex;
+  }
+}
+
+/* The pad's hint covers the pad, because a pad held upright is the thing being
+   reported. It breaks out of the stage's safe-area padding so the scrim reaches
+   the glass, and it sits above the HUD and the pause button. */
+.rotate--overlay {
+  position: absolute;
+  inset: calc(var(--pad-t) * -1) calc(var(--pad-r) * -1) calc(var(--pad-b) * -1)
+    calc(var(--pad-x) * -1);
+  z-index: 4;
+  align-items: center;
+  justify-content: center;
+  background: rgba(7, 9, 16, 0.92);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  animation: fade-in 240ms ease both;
+}
+
+.rotate__box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  max-width: min(340px, 84%);
+  padding: 0 var(--pad-x);
+  text-align: center;
+}
+
+.rotate__glyph {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 108px;
+  height: 108px;
+}
+
+.rotate__glyph::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px dashed var(--accent-hairline);
+}
+
+/* The whole hint, really: a phone that turns, waits a beat on its side — the
+   way you want it held — and goes back to ask again. */
+.rotate__phone {
+  width: 46px;
+  height: 76px;
+  border-radius: 12px;
+  border: 3px solid var(--accent);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(0, 0, 0, 0.3));
+  box-shadow: 0 0 26px var(--accent-glow);
+  animation: rotate-phone 2800ms cubic-bezier(0.62, 0, 0.2, 1) infinite;
+}
+
+@keyframes rotate-phone {
+  0%,
+  14% {
+    transform: rotate(0deg);
+  }
+  36%,
+  82% {
+    transform: rotate(-90deg);
+  }
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+.rotate__title {
+  font-size: clamp(19px, 5.4vw, 26px);
+  letter-spacing: 0.14em;
+  margin-right: -0.14em;
+  color: var(--ink);
+}
+
+.rotate__copy {
+  margin: -8px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+/* The way past the hint. A phone with rotation lock on cannot answer it, and
+   nothing on this screen may keep a chef out of the kitchen. */
+.rotate__waive {
+  appearance: none;
+  -webkit-appearance: none;
+  min-height: 46px;
+  padding: 12px 22px;
+  border-radius: 999px;
+  border: 1px solid var(--edge);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  touch-action: manipulation;
+  transition:
+    transform 90ms ease,
+    color 160ms ease,
+    background 160ms ease;
+}
+
+.rotate__waive:active {
+  transform: scale(0.96);
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* The lobby's hint is a line, not a wall: nobody is cooking yet, so it only
+   asks people to turn the phone before the whistle goes. */
+.rotate--note {
+  align-items: center;
+  gap: 7px;
+  padding: 3px 12px 3px 5px;
+  border-radius: 999px;
+  background: var(--accent-faint);
+  border: 1px dashed var(--accent-hairline);
+  color: var(--accent-bright);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+
+.rotate--note .rotate__glyph {
+  width: 20px;
+  height: 20px;
+}
+
+.rotate--note .rotate__glyph::before {
+  display: none;
+}
+
+.rotate--note .rotate__phone {
+  width: 14px;
+  height: 22px;
+  border-width: 2px;
+  border-radius: 5px;
+  box-shadow: none;
+}
+
+/* Short portrait windows (a phone held upright is not short, but a desktop
+   window can be): the glyph goes, the words stay. */
+@media (orientation: portrait) and (max-height: 520px) {
+  .rotate--overlay .rotate__glyph {
+    display: none;
+  }
+}
+
+@media (orientation: portrait) {
+  /* The note has to pay for itself: held upright, the lobby is already exactly
+     as tall as its own contents on a 667 pt phone, so the rhythm around it
+     tightens by about what the pill costs. */
+  .screen--lobby {
+    gap: 10px;
+  }
+
+  .lobby-head {
+    gap: 7px;
+  }
+
+  /* And a roster with more chefs than room is a scroll, not a bug — so let it
+     look like one: the last card fades out under the kitchen chooser instead
+     of being guillotined. Invisible whenever the list already fits. */
+  .roster-wrap {
+    -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 16px), transparent 100%);
+    mask-image: linear-gradient(180deg, #000 calc(100% - 16px), transparent 100%);
+  }
 }

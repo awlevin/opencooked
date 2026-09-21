@@ -130,6 +130,17 @@ or move the room to the next level. Players may join mid-round and are spawned
 immediately. Every number in brackets above is a per-level override; the
 constants in `shared/types.ts` are only the defaults.
 
+**Names**: `rename {name}` from a seated controller changes that chef's own
+name, between rounds only (`lobby` or `gameover`) — mid-service the name is on
+the TV under the chef, on the pause card and on every phone's HUD, and a chef
+quietly becoming somebody else there is a distraction, not a feature. The name
+is cleaned exactly as a join name is (control characters dropped, trimmed,
+`MAX_NAME_LEN`), and an empty or unchanged one is ignored rather than
+answered. The seat record is the only copy that matters: it feeds the `lobby`
+broadcast every screen reads, the registry entry a reconnect token reclaims
+the seat from, and the sim's label for the player. Duplicate names are allowed
+— colour is what tells two chefs apart.
+
 **Pause**: `pause` / `resume` from any seated controller, `phase === 'playing'`
 only — the host screen has no seat and cannot stop the round. While
 `Snapshot.paused` is non-null every clock in the kitchen freezes (round timer,
@@ -147,13 +158,26 @@ sent it on join.
 
 **Movement**: joystick vector → velocity (3.6 tiles/s). Circle collision
 (r=0.35) vs non-floor tiles and other players (push apart softly). Facing
-= last nonzero input direction. The interaction target is the tile one
-step in front of the player (round(pos + dir)).
+= last nonzero input direction.
+
+**Aim**: the sim picks one target tile per chef per tick and publishes it as
+`PlayerState.target` (null when nothing is in reach). Every button reads that
+one number, and the TV highlights that one tile, so what the screen promises
+and what the press does cannot drift apart. Every non-floor tile whose centre
+is within 1.5 tiles and inside a ±60° cone of the facing is scored on how well
+it lines up (which leads), how close it is (which settles equal angles), and
+whether a press would do anything at all given what is in hand (which only
+breaks near-ties — the assist disambiguates, it never overrules a chef who is
+plainly pointing at something). The tile already targeted keeps a small head
+start, so the choice cannot flicker. While the stick is at rest the facing
+eases onto the target's centre at 7 rad/s: chefs square up with the counter
+they are working, and never move on their own.
 
 **Button A (grab/put)** against the target tile:
 | Holding | Target | Effect |
 |---|---|---|
 | nothing | crate | pick raw ingredient |
+| nothing | board with an unchopped choppable ingredient | chop while held down (identical to B) |
 | nothing | counter/board with item | pick it up (aborts chop progress) |
 | nothing | plates | pick empty plate |
 | nothing | vessel (ring or counter), burnt | dump the char → idle empty |
@@ -174,14 +198,22 @@ step in front of the player (round(pos + dir)).
 Every plate-filling row above goes through the one plating rule, so a part
 that no menu dish still wants is simply refused.
 
+The chop row is the one place A reads the situation rather than the table:
+empty hands at a board holding something raw can only mean "chop that", so A
+is the knife there, held down exactly like B, and the two rows never overlap —
+a chopped part, or one the catalogue says needs no knife (a bun, rice, nori),
+is picked up as usual. An ingredient nobody wants chopped is chopped first and
+then picked up; the board is never a place things get stuck.
+
 A burning tile refuses every A press. Put the fire out first.
 
 **Button B**: holding the extinguisher → spray while held down (server sets
 `spraying`); a burning tile in front takes `EXTINGUISH_MS` of foam and goes
-out. Otherwise, facing a board holding an unchopped ingredient → chop while
-held down (server sets `chopping`, accumulates `chopMs`). Otherwise → dash
-(150 ms at 8 tiles/s, 500 ms cooldown). Two chefs working one board, or one
-fire, is never a speedup.
+out. Otherwise, facing a board holding an unchopped choppable ingredient →
+chop while held down (server sets `chopping`, accumulates `chopMs`), with a
+full hand as well as an empty one. Otherwise → dash (150 ms at 8 tiles/s,
+500 ms cooldown). Two chefs working one board, or one fire, is never a
+speedup — and neither is one chef leaning on both buttons.
 
 ### Worlds and levels (`shared/levels/`)
 
@@ -252,6 +284,13 @@ already busy. Every effect is drawn purely from the event's id (which seeds
 its jitter) and its age, so `components/host/render/fx.ts` holds no state,
 allocates nothing per frame, and plays the same celebration on a TV that only
 just connected. Nothing but the departing ticket may draw on the order rail.
+
+**A chef must never have to guess what a press will do.** Each one wears a
+small chevron on the floor in front of them, in their own colour, and the
+station they are aiming at wears a soft ring in that same colour — both driven
+by `PlayerState.target` and nothing else. The ring eases in, glides to the
+counter next door rather than popping, and nests when two chefs want the same
+tile, so a four-player kitchen reads as four intentions instead of clutter.
 
 TypeScript strict, `npm run typecheck` clean. Host view must look
 delicious at TV distance: chunky cartoon kitchen, big readable orders/score/

@@ -86,12 +86,44 @@ const PLAYER_PUSH = 0.5;
 /** Button edges buffered between ticks, per button, per player. */
 const MAX_QUEUED_PRESSES = 4;
 
+// --- aim assist ------------------------------------------------------------
+//
+// The numbers behind `pickTarget`. They are tuned against one question: does
+// the station a chef is looking at stay the station they act on, while their
+// thumb wanders? See the aiming section for the reasoning.
+
+/**
+ * How far a chef can reach, centre to tile centre. Just over √2, so a station
+ * leaned into from its diagonal is in reach and one two steps away never is.
+ */
+const REACH = 1.5;
+/** Half-angle of the cone in front of a chef, as a cosine. 0.5 = ±60°. */
+const MIN_ALIGN = 0.5;
+/** Lining up with the facing is the chef's intent, so it leads the score. */
+const W_ALIGN = 2.2;
+/** Closer is better, but only enough to settle two tiles at the same angle. */
+const W_NEAR = 0.3;
+/**
+ * A tile a press would actually do something on gets a nudge — never enough
+ * to beat a station the chef is plainly pointing at, which is what keeps the
+ * assist honest: it disambiguates, it does not decide.
+ */
+const W_USEFUL = 0.3;
+/**
+ * Head start the tile we already aim at keeps. Enough to absorb the few
+ * degrees a thumb wanders around a tie; not enough to sit through a turn.
+ */
+const STICKY = 0.15;
+/** Radians/s the facing eases onto the target while the stick is at rest. */
+const SNAP_RATE = 7;
+
 /** Per-player state that is not part of the wire snapshot. */
 interface Runtime {
   s: PlayerState;
   move: Vec2;
   aPresses: number;
   bPresses: number;
+  aDown: boolean;
   bDown: boolean;
   dashCooldownMs: number;
   dashDir: Vec2;
@@ -155,10 +187,14 @@ function cloneTile(tile: Tile): Tile {
   return out;
 }
 
-function clonePlayer(p: PlayerState): PlayerState {
+function clonePlayer(p: PlayerState, tileCount: number): PlayerState {
   const dx = num(p.dir?.x);
   const dy = num(p.dir?.y);
   const facing = Math.hypot(dx, dy) > 1e-4 ? { x: dx, y: dy } : { x: 0, y: 1 };
+  // The target is a function of position, facing and tiles — all of which the
+  // checkpoint carries — so it is kept rather than dropped: the TV that picks
+  // the round back up highlights the right counter on its very first frame.
+  const target = p.target;
   return {
     id: String(p.id),
     name: String(p.name),
@@ -169,6 +205,10 @@ function clonePlayer(p: PlayerState): PlayerState {
     chopping: false,
     spraying: false,
     dashMsLeft: 0,
+    target:
+      typeof target === 'number' && Number.isInteger(target) && target >= 0 && target < tileCount
+        ? target
+        : null,
   };
 }
 
@@ -348,9 +388,11 @@ export class Game {
       rt.s.chopping = false;
       rt.s.spraying = false;
       rt.s.dashMsLeft = 0;
+      rt.s.target = null;
       rt.move = { x: 0, y: 0 };
       rt.aPresses = 0;
       rt.bPresses = 0;
+      rt.aDown = false;
       rt.bDown = false;
       rt.dashCooldownMs = 0;
       rt.dashDir = { x: 0, y: 1 };
@@ -407,12 +449,13 @@ export class Game {
     this.rts.clear();
     s.players = [];
     for (const p of src.players) {
-      const state = clonePlayer(p);
+      const state = clonePlayer(p, s.tiles.length);
       this.rts.set(state.id, {
         s: state,
         move: { x: 0, y: 0 },
         aPresses: 0,
         bPresses: 0,
+        aDown: false,
         bDown: false,
         dashCooldownMs: 0,
         dashDir: { x: state.dir.x, y: state.dir.y },
@@ -447,18 +490,26 @@ export class Game {
       chopping: false,
       spraying: false,
       dashMsLeft: 0,
+      target: null,
     };
     this.rts.set(id, {
       s,
       move: { x: 0, y: 0 },
       aPresses: 0,
       bPresses: 0,
+      aDown: false,
       bDown: false,
       dashCooldownMs: 0,
       dashDir: { x: 0, y: 1 },
     });
     this.snapshot.players.push(s);
     return s;
+  }
+
+  /** A rename is a label change: the sim keys everything off the id. */
+  renamePlayer(id: string, name: string): void {
+    const rt = this.rts.get(id);
+    if (rt) rt.s.name = name;
   }
 
   removePlayer(id: string): void {
@@ -541,8 +592,12 @@ export class Game {
     const rt = this.rts.get(id);
     if (!rt) return;
     // Cap the queue so a spamming phone cannot buy extra actions per tick.
-    if (btn === 'a') rt.aPresses = Math.min(rt.aPresses + 1, MAX_QUEUED_PRESSES);
-    else {
+    if (btn === 'a') {
+      rt.aPresses = Math.min(rt.aPresses + 1, MAX_QUEUED_PRESSES);
+      // A is held as well as tapped: empty-handed at a board, holding it down
+      // is the chop (see `chopHeld`).
+      rt.aDown = true;
+    } else {
       rt.bPresses = Math.min(rt.bPresses + 1, MAX_QUEUED_PRESSES);
       rt.bDown = true;
     }
@@ -551,7 +606,8 @@ export class Game {
   release(id: string, btn: Btn): void {
     const rt = this.rts.get(id);
     if (!rt) return;
-    if (btn === 'b') rt.bDown = false;
+    if (btn === 'a') rt.aDown = false;
+    else rt.bDown = false;
   }
 
   /**
@@ -626,6 +682,10 @@ export class Game {
       rt.s.dashMsLeft = Math.max(0, rt.s.dashMsLeft - dt);
       rt.dashCooldownMs = Math.max(0, rt.dashCooldownMs - dt);
     }
+
+    // One aim per chef per tick: every button below reads it, and so does the
+    // TV. Nothing may re-derive what a press is about to hit.
+    this.updateAim(dt);
 
     for (const rt of this.rts.values()) {
       while (rt.aPresses > 0) {
@@ -839,17 +899,23 @@ export class Game {
   }
 
   /**
-   * Empty a finished vessel onto a plate. All or nothing: every piece has to
-   * be something the plate is allowed to take, so a pot of soup cannot be
-   * poured half-way onto a half-built burger.
+   * Whether a finished vessel would go onto this plate. All or nothing: every
+   * piece has to be something the plate is allowed to take, so a pot of soup
+   * cannot be poured half-way onto a half-built burger.
    */
-  private pourInto(contents: Ingredient[], pot: Pot): boolean {
+  private canPourInto(contents: readonly Ingredient[], pot: Pot): boolean {
     if (pot.state !== 'done' || pot.contents.length === 0) return false;
     const staged = [...contents];
     for (const ing of pot.contents) {
       if (!this.canPlate(staged, ing)) return false;
       staged.push(ing);
     }
+    return true;
+  }
+
+  /** Tip a finished vessel onto a plate, if the whole batch is welcome. */
+  private pourInto(contents: Ingredient[], pot: Pot): boolean {
+    if (!this.canPourInto(contents, pot)) return false;
     contents.push(...pot.contents);
     Game.emptyPot(pot);
     return true;
@@ -860,7 +926,7 @@ export class Game {
     return canAddToPlate(contents, ing, this.menu);
   }
 
-  // --- tiles / targeting ---------------------------------------------------
+  // --- tiles ---------------------------------------------------------------
 
   private tileAt(x: number, y: number): Tile | null {
     const s = this.snapshot;
@@ -868,19 +934,180 @@ export class Game {
     return s.tiles[y * s.w + x];
   }
 
-  /** Tile one step in front of the player: round(pos + dir), clamped. */
-  private targetIndex(p: PlayerState): number {
+  // --- aiming --------------------------------------------------------------
+  //
+  // Which station a chef is about to act on. One answer per tick, written to
+  // `PlayerState.target`, read by every button and drawn by the TV — so the
+  // tile the screen highlights is, by construction, the tile the press lands
+  // on.
+  //
+  // This used to be `round(pos + dir)`, and that single line is what players
+  // were complaining about: an analog stick wobbles as it comes to rest, a
+  // diagonal lean picks the corner tile, and half a tile of drift silently
+  // retargets a press onto the counter next door. Instead every station within
+  // reach is scored on
+  //
+  //   * how well it lines up with the facing (the chef's stated intent),
+  //   * how close it is (settles two tiles at the same angle),
+  //   * whether a press would do anything at all given what is in hand,
+  //
+  // and the tile already aimed at keeps a head start, so the choice cannot
+  // flicker between two neighbours. Facing eases onto the chosen tile while
+  // the stick is at rest, which makes the chevron on screen and the press
+  // agree without ever moving a chef who did not ask to move.
+
+  private updateAim(dt: number): void {
+    for (const rt of this.rts.values()) {
+      const ti = this.pickTarget(rt.s);
+      rt.s.target = ti;
+      // The stick always wins: squaring up only ever happens on a thumb that
+      // has let go, and never mid-dash.
+      if (ti === null || rt.s.dashMsLeft > 0) continue;
+      if (Math.hypot(rt.move.x, rt.move.y) > 1e-4) continue;
+      this.snapFacing(rt.s, ti, dt);
+    }
+  }
+
+  /** The station this chef is aiming at, or null when none is in reach. */
+  private pickTarget(p: PlayerState): number | null {
     const s = this.snapshot;
-    const tx = clamp(Math.round(p.pos.x + p.dir.x), 0, s.w - 1);
-    const ty = clamp(Math.round(p.pos.y + p.dir.y), 0, s.h - 1);
-    return ty * s.w + tx;
+    const len = Math.hypot(p.dir.x, p.dir.y);
+    if (len < 1e-4) return null;
+    const fx = p.dir.x / len;
+    const fy = p.dir.y / len;
+    const prev = p.target;
+
+    const minX = Math.max(0, Math.ceil(p.pos.x - REACH));
+    const maxX = Math.min(s.w - 1, Math.floor(p.pos.x + REACH));
+    const minY = Math.max(0, Math.ceil(p.pos.y - REACH));
+    const maxY = Math.min(s.h - 1, Math.floor(p.pos.y + REACH));
+
+    let best = -Infinity;
+    let bestIdx: number | null = null;
+    let prevScore = -Infinity;
+
+    for (let ty = minY; ty <= maxY; ty++) {
+      for (let tx = minX; tx <= maxX; tx++) {
+        const i = ty * s.w + tx;
+        const tile = s.tiles[i]!;
+        if (tile.t === 'floor') continue;
+        const ox = tx - p.pos.x;
+        const oy = ty - p.pos.y;
+        const d = Math.hypot(ox, oy);
+        if (d > REACH || d < 1e-6) continue;
+        const align = (ox * fx + oy * fy) / d;
+        if (align < MIN_ALIGN) continue;
+        const score =
+          W_ALIGN * align + W_NEAR * (REACH - d) + (this.affords(tile, p.held) ? W_USEFUL : 0);
+        if (i === prev) prevScore = score;
+        if (score > best) {
+          best = score;
+          bestIdx = i;
+        }
+      }
+    }
+
+    // Hysteresis. The tile we were already on stays ours until something is
+    // clearly better, which is what stops a target humming between two
+    // counters while a chef stands still.
+    if (prev !== null && prevScore > -Infinity && best - prevScore <= STICKY) return prev;
+    return bestIdx;
+  }
+
+  /** Ease the facing onto the target's centre. Rate-limited, never a snap. */
+  private snapFacing(p: PlayerState, ti: number, dt: number): void {
+    const s = this.snapshot;
+    const ox = (ti % s.w) - p.pos.x;
+    const oy = Math.floor(ti / s.w) - p.pos.y;
+    const d = Math.hypot(ox, oy);
+    if (d < 1e-6) return;
+    const step = (SNAP_RATE * dt) / 1000;
+    const have = Math.atan2(p.dir.y, p.dir.x);
+    let delta = ((Math.atan2(oy, ox) - have + Math.PI) % (Math.PI * 2)) - Math.PI;
+    if (delta < -Math.PI) delta += Math.PI * 2;
+    if (Math.abs(delta) <= step) {
+      p.dir = { x: ox / d, y: oy / d };
+      return;
+    }
+    const a = have + (delta > 0 ? step : -step);
+    p.dir = { x: Math.cos(a), y: Math.sin(a) };
+  }
+
+  /**
+   * Would a press do anything on this tile, holding this? That is button A's
+   * table below, plus the one thing only B can do: foam on a fire. (B's chop
+   * needs no case of its own — a board with something on it already affords A
+   * to an empty hand, and a chef with a full hand is not picking which board
+   * to chop on.)
+   *
+   * The aim only uses this to break near-ties, so it can never put a chef's
+   * onion somewhere they were not pointing. It does have to agree with the
+   * table, though, and a test in game.test.ts pins the two together: it presses
+   * A on every tile-and-hand combination it can build and checks that the
+   * kitchen changed exactly when this said it would.
+   */
+  private affords(tile: Tile, held: HeldItem | null): boolean {
+    // A burning tile refuses every A press; foam is the only answer.
+    if (tile.fire) return held?.kind === 'extinguisher';
+
+    switch (tile.t) {
+      case 'floor':
+        return false;
+      case 'crate':
+        return !held && tile.crate !== undefined;
+      case 'plates':
+        return !held;
+      case 'serve':
+        return held?.kind === 'plate' && held.contents.length > 0;
+      case 'trash':
+        if (!held) return false;
+        if (held.kind === 'ingredient') return true;
+        if (held.kind === 'pot') return held.pot.contents.length > 0 || held.pot.state !== 'idle';
+        return held.kind === 'plate' && held.contents.length > 0;
+      case 'extinguisher':
+        if (!held) return tile.item?.kind === 'extinguisher';
+        return held.kind === 'extinguisher' && !tile.item;
+      case 'stove': {
+        const pot = tile.pot;
+        if (!pot) return held?.kind === 'pot';
+        if (!held) return true; // lift it off, or dump the char
+        return this.affordsPot(pot, held);
+      }
+      case 'counter':
+      case 'board': {
+        const item = tile.item;
+        if (!held) return !!item;
+        const surfacePot = item?.kind === 'pot' ? item.pot : null;
+        if (surfacePot) return this.affordsPot(surfacePot, held);
+        if (held.kind === 'pot' && item?.kind === 'plate') {
+          return this.canPourInto(item.contents, held.pot);
+        }
+        if (held.kind === 'ingredient' && item?.kind === 'plate') {
+          return this.canPlate(item.contents, held.ing);
+        }
+        if (held.kind === 'plate' && item?.kind === 'ingredient') {
+          return this.canPlate(held.contents, item.ing);
+        }
+        if (item) return false;
+        // Boards only accept ingredients (that is all you can chop).
+        return tile.t !== 'board' || held.kind === 'ingredient';
+      }
+    }
+  }
+
+  /** The vessel half of `affords`, for a ring and a counter pot alike. */
+  private affordsPot(pot: Pot, held: HeldItem): boolean {
+    if (held.kind === 'ingredient') return Game.vesselAccepts(pot, held.ing);
+    if (held.kind === 'plate') return this.canPourInto(held.contents, pot);
+    return false;
   }
 
   // --- button A: grab / put ------------------------------------------------
 
   private actionA(rt: Runtime, events: BuzzEvent[]): void {
     const p = rt.s;
-    const ti = this.targetIndex(p);
+    const ti = p.target;
+    if (ti === null) return;
     const tile = this.snapshot.tiles[ti];
     if (!tile) return;
     const held = p.held;
@@ -916,6 +1143,11 @@ export class Game {
             buzz(BUZZ_PLACE);
             return;
           }
+          // Empty hands at a board with something raw on it: the only thing
+          // anyone ever means is "chop that", so A is the chop (held down,
+          // exactly like B) instead of snatching the ingredient back. Once it
+          // is chopped the same button picks it up again.
+          if (Game.choppable(tile)) return;
           p.held = item;
           tile.item = null;
           if (tile.t === 'board') {
@@ -1105,17 +1337,23 @@ export class Game {
     if (keep > 0) fx.splice(0, keep);
   }
 
-  // --- button B: chop / dash -----------------------------------------------
+  // --- chopping: button B, or button A with empty hands --------------------
+
+  /** A board with something on it that still wants the knife. */
+  private static choppable(tile: Tile): boolean {
+    if (tile.t !== 'board' || tile.fire) return false;
+    const item = tile.item;
+    if (!item || item.kind !== 'ingredient') return false;
+    return INGREDIENTS[item.ing.type].chop && !item.ing.chopped;
+  }
 
   /** Index of the board this player could chop on right now, else null. */
   private chopTargetIndex(p: PlayerState): number | null {
     if (p.held?.kind === 'extinguisher') return null; // that hand is busy
-    const ti = this.targetIndex(p);
+    const ti = p.target;
+    if (ti === null) return null;
     const tile = this.snapshot.tiles[ti];
-    if (!tile || tile.t !== 'board' || tile.fire) return null;
-    const item = tile.item;
-    if (!item || item.kind !== 'ingredient' || item.ing.chopped) return null;
-    return ti;
+    return tile && Game.choppable(tile) ? ti : null;
   }
 
   private actionB(rt: Runtime): void {
@@ -1134,15 +1372,20 @@ export class Game {
 
   private stopChoppingAt(ti: number): void {
     for (const rt of this.rts.values()) {
-      if (rt.s.chopping && this.targetIndex(rt.s) === ti) rt.s.chopping = false;
+      if (rt.s.chopping && rt.s.target === ti) rt.s.chopping = false;
     }
+  }
+
+  /** Is this chef leaning on a chop button? B always, A only empty-handed. */
+  private static chopHeld(rt: Runtime): boolean {
+    return rt.bDown || (rt.aDown && rt.s.held === null);
   }
 
   private updateChopping(dt: number, events: BuzzEvent[]): void {
     const advanced = new Set<number>();
     for (const rt of this.rts.values()) {
       const p = rt.s;
-      if (!rt.bDown) {
+      if (!Game.chopHeld(rt)) {
         p.chopping = false;
         continue;
       }
@@ -1164,7 +1407,7 @@ export class Game {
         tile.chopMs = 0;
         // Everyone working this board stops and feels the finish.
         for (const other of this.rts.values()) {
-          if (other.s.chopping && this.targetIndex(other.s) === ti) {
+          if (other.s.chopping && other.s.target === ti) {
             other.s.chopping = false;
             events.push({ playerId: other.s.id, buzzMs: BUZZ_CHOP_DONE });
           }
@@ -1187,7 +1430,8 @@ export class Game {
         continue;
       }
       p.spraying = true;
-      const ti = this.targetIndex(p);
+      const ti = p.target;
+      if (ti === null) continue;
       const tile = this.snapshot.tiles[ti];
       if (!tile?.fire || advanced.has(ti)) continue;
       advanced.add(ti);
@@ -1195,7 +1439,7 @@ export class Game {
       if (tile.fire.sprayMs < EXTINGUISH_MS) continue;
       delete tile.fire;
       for (const other of this.rts.values()) {
-        if (other.s.spraying && this.targetIndex(other.s) === ti) {
+        if (other.s.spraying && other.s.target === ti) {
           events.push({ playerId: other.s.id, buzzMs: BUZZ_FIRE_OUT });
         }
       }
